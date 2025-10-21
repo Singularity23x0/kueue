@@ -151,86 +151,19 @@ func NewWorkloadReconciler(client client.Client, queues *qcache.Manager, cache *
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceclaims,verbs=get;list;watch
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceclaimtemplates,verbs=get;list;watch
 
-//------------------------------------------------------------------------------
-//------------------------------------------------------------------------------
-//------------------------------------------------------------------------------
-
-// (1) Test for the edge case that is suspected to be an actual bug to fix.
-// (1.a) Inspiration: ckeckout Dynamic Resource Allocation implementation.
-// (2) Options:
-//
-//	(A) make the reconcile request accept old and new [---]
-//	(B) work out what to do myself by understanding the code [++]
-//	(C) inspire myself by (1.a) [+]
-//	(D) try to eliminate unnecessary error handling [?]
-
-// queue denotes the `queues  *qcache.Manager` field
-//.   - add or uodate reuires workload data [OK]
-//.   - QueueAssociatedInadmissibleWorkloadsAfter requires only key [OK]
-//.   - delete requires only key [OK]
-
-// cache denotes the `cache   *schdcache.Cache` field
-//.   - delete requires workload data [!] <- this means we will require a rework of the underlying cache methods
-//.   - add or update requires workload data [OK]
-
-// workload key := Reference(Namspace, Name)
-// todo: verify what NotifyWatchers actually does
-
-// Create:
-// Happens when either:
-// A) the workloads is newly created,
-// B) we restarted and are re-creating an existing workload. (Status can be any.)
-//
-//
-// Logic:
-// 1) Notifies watchers (nil, wl)
-// 2) Handles only non-finished, non DRA workloads.
-// 3) If active but without quota reserved - schedules (in queue) addOrUpdate(wl)
-// 4) Schedules chache update.
-// 5) Queues secind pass if needed (todo: deep dive into logic)
-
-// Update:
-//
-//
-// Logic:
-// 1) Notifies watchers (old, new)
-// 2)
-
-// Delete:
-// Unique logic when doing a delete for unknwon reason - todo: deep dive.
-// todo: learn what are the conditions for deletion (based on wl contents) and how to proceed in each one.
-// todo: confirm if for a deleted workload r.client.Get will always return nothing (not-found)
-//         - if yes then all the deletion logic will happen in the if(not-found) block.
-//
-// Note: queues use the wl key to delete workloads, and require nothing else from the wl (todo: confirm)
-// Note: cache require ???
-// Note: QueueAssociatedInadmissibleWorkloadsAfter requires ???
-// todo: Verify what param values can a deleted workload have.
-// todo: Verify what params do QueueAssociatedInadmissibleWorkloadsAfter and cache delete actually need.
-//
-// Logic:
-// 1) Notifies watchers (wl, nil)
-// 2) If has quota reserved: schedule QueueAssociatedInadmissibleWorkloadsAfter in queue and cleanup the cache.
-// 3) If the deletion status is unknown: do same as for (2) just in case; keep in mind that there might be nothing to delete as nothing got created just yet.
-// 4) Schedule deletion in queue.
-
-// Then the remaining (current) reconcile logic is executed.
-
-//------------------------------------------------------------------------------
-//------------------------------------------------------------------------------
-//------------------------------------------------------------------------------
 func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var wl kueue.Workload
-	
+	log := ctrl.LoggerFrom(ctx)
+
 	if err := r.client.Get(ctx, req.NamespacedName, &wl); err != nil {
 		// Clean queues and cache after a workload was deleted
-		r.cleanUp(ctx, req.NamespacedName)
+		r.cleanUp(ctx, req.NamespacedName, log)
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
 	// Enrich logs
 	status := workload.Status(&wl)
-	log := ctrl.LoggerFrom(ctx).WithValues("workload", klog.KObj(&wl), "queue", &wl.Spec.QueueName, "status", status)
+	log = log.WithValues("workload", klog.KObj(&wl), "queue", &wl.Spec.QueueName, "status", status)
 	log.V(2).Info("Reconcile Workload")
 
 	// Add/Update
@@ -240,8 +173,10 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	return r.commonReconcile(ctx, req, &wl, log)
 }
 
-func (r *WorkloadReconciler) cleanUp(ctx context.Context, key types.NamespacedName) {
-
+func (r *WorkloadReconciler) cleanUp(ctx context.Context, key types.NamespacedName, log logr.Logger) {
+	// Prblem with r.cache.DeleteWorkload(log, workload)
+	// When deleting a workload that had quota reservation we are cannot retrieve `c.hm.ClusterQueue(w.Status.Admission.ClusterQueue)`.
+	// We also have multiple nested check for "has quota reservation".
 }
 
 func (r *WorkloadReconciler) addOrUpdate(ctx context.Context, wl *kueue.Workload) {
