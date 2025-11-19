@@ -149,7 +149,7 @@ func TestUpdateClusterQueue(t *testing.T) {
 			t.Fatalf("Failed adding clusterQueue %s: %v", cq.Name, err)
 		}
 		// Increase the popCycle to ensure that the workload will be added as inadmissible.
-		manager.getClusterQueue(kueue.ClusterQueueReference(cq.Name)).popCycle++
+		manager.GetClusterQueue(kueue.ClusterQueueReference(cq.Name)).popCycle++
 	}
 	for _, q := range queues {
 		if err := manager.AddLocalQueue(ctx, q); err != nil {
@@ -1232,8 +1232,9 @@ func TestGetPendingWorkloadsInfo(t *testing.T) {
 				{
 					Obj: &kueue.Workload{
 						ObjectMeta: metav1.ObjectMeta{
-							Name:      "a",
-							Namespace: "",
+							Name:       "a",
+							Namespace:  "",
+							Finalizers: []string{kueue.SafeDeleteFinalizerName},
 						},
 						Spec: kueue.WorkloadSpec{
 							QueueName: "foo",
@@ -1243,8 +1244,9 @@ func TestGetPendingWorkloadsInfo(t *testing.T) {
 				{
 					Obj: &kueue.Workload{
 						ObjectMeta: metav1.ObjectMeta{
-							Name:      "b",
-							Namespace: "",
+							Name:       "b",
+							Namespace:  "",
+							Finalizers: []string{kueue.SafeDeleteFinalizerName},
 						},
 						Spec: kueue.WorkloadSpec{
 							QueueName: "foo",

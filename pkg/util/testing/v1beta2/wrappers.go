@@ -63,7 +63,11 @@ type WorkloadWrapper struct{ kueue.Workload }
 // with a single container.
 func MakeWorkload(name, ns string) *WorkloadWrapper {
 	return &WorkloadWrapper{kueue.Workload{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       name,
+			Namespace:  ns,
+			Finalizers: []string{kueue.SafeDeleteFinalizerName},
+		},
 		Spec: kueue.WorkloadSpec{
 			PodSets: []kueue.PodSet{
 				*MakePodSet(kueue.DefaultPodSetName, 1).Obj(),
@@ -105,6 +109,23 @@ func (w *WorkloadWrapper) Generation(num int64) *WorkloadWrapper {
 
 func (w *WorkloadWrapper) Name(name string) *WorkloadWrapper {
 	w.Workload.Name = name
+	return w
+}
+
+func (w *WorkloadWrapper) WithFinalizers(fin ...string) *WorkloadWrapper {
+	addSafeDeleteFinalizer := true
+	for _, f := range fin {
+		if f == kueue.SafeDeleteFinalizerName {
+			addSafeDeleteFinalizer = false
+		}
+	}
+
+	if addSafeDeleteFinalizer {
+		w.ObjectMeta.Finalizers = append(fin, kueue.SafeDeleteFinalizerName)
+	} else {
+		w.ObjectMeta.Finalizers = fin
+	}
+
 	return w
 }
 
@@ -370,6 +391,10 @@ func (w *WorkloadWrapper) UnhealthyNodes(nodeNames ...string) *WorkloadWrapper {
 func (w *WorkloadWrapper) DeletionTimestamp(t time.Time) *WorkloadWrapper {
 	w.Workload.DeletionTimestamp = ptr.To(metav1.NewTime(t).Rfc3339Copy())
 	return w
+}
+
+func (w *WorkloadWrapper) Delete() *WorkloadWrapper {
+	return w.DeletionTimestamp(time.Now())
 }
 
 func (w *WorkloadWrapper) RequeueState(count *int32, requeueAt *metav1.Time) *WorkloadWrapper {
