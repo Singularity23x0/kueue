@@ -46,12 +46,13 @@ func truncateMessage(message string, limit int) string {
 }
 
 // CloneObjectMetaForCreation creates a copy of the provided ObjectMeta containing
-// only the name, namespace, labels and annotations
+// only the name, namespace, labels, annotations and finalizers
 func CloneObjectMetaForCreation(orig *metav1.ObjectMeta) metav1.ObjectMeta {
 	return metav1.ObjectMeta{
 		Name:        orig.Name,
 		Namespace:   orig.Namespace,
 		Labels:      maps.Clone(orig.Labels),
 		Annotations: maps.Clone(orig.Annotations),
+		Finalizers:  orig.Finalizers,
 	}
 }

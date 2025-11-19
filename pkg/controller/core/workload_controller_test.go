@@ -2560,7 +2560,7 @@ func TestReconcile(t *testing.T) {
 					Status:             metav1.ConditionTrue,
 					LastTransitionTime: metav1.NewTime(testStartTime.Add(-2 * util.LongTimeout)),
 				}).
-				Delete().
+				Deleted().
 				Obj(),
 			wantWorkload:       nil,
 			wantError:          nil,
@@ -2586,7 +2586,7 @@ func TestReconcile(t *testing.T) {
 					Status:             metav1.ConditionTrue,
 					LastTransitionTime: metav1.NewTime(testStartTime.Add(-2 * util.LongTimeout)),
 				}).
-				Delete().
+				Deleted().
 				Obj(),
 			wantWorkload:       nil,
 			wantError:          nil,
@@ -2614,7 +2614,7 @@ func TestReconcile(t *testing.T) {
 					Status:             metav1.ConditionTrue,
 					LastTransitionTime: metav1.NewTime(testStartTime.Add(-2 * util.LongTimeout)),
 				}).
-				Delete().
+				Deleted().
 				Obj(),
 			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
 				WithFinalizers(kueue.ResourceInUseFinalizerName).
@@ -2626,7 +2626,7 @@ func TestReconcile(t *testing.T) {
 					Status:             metav1.ConditionTrue,
 					LastTransitionTime: metav1.NewTime(testStartTime.Add(-2 * util.LongTimeout)),
 				}).
-				Delete().
+				Deleted().
 				Obj(),
 			wantError:          nil,
 			wantWorkloadCached: true,
@@ -2643,7 +2643,7 @@ func TestReconcile(t *testing.T) {
 					Status:             metav1.ConditionTrue,
 					LastTransitionTime: metav1.NewTime(testStartTime.Add(-2 * util.LongTimeout)),
 				}).
-				Delete().
+				Deleted().
 				Obj(),
 			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
@@ -2654,7 +2654,7 @@ func TestReconcile(t *testing.T) {
 					Status:             metav1.ConditionTrue,
 					LastTransitionTime: metav1.NewTime(testStartTime.Add(-2 * util.LongTimeout)),
 				}).
-				Delete().
+				Deleted().
 				Obj(),
 			wantError:          nil,
 			wantWorkloadCached: true,
@@ -2904,7 +2904,7 @@ func TestFinalize(t *testing.T) {
 					Status:             metav1.ConditionTrue,
 					LastTransitionTime: metav1.NewTime(testStartTime.Add(-2 * util.LongTimeout)),
 				}).
-				Delete().
+				Deleted().
 				Obj(),
 			wantError:          nil,
 			wantWorkloadCached: false,
@@ -2930,7 +2930,7 @@ func TestFinalize(t *testing.T) {
 					Status:             metav1.ConditionTrue,
 					LastTransitionTime: metav1.NewTime(testStartTime.Add(-2 * util.LongTimeout)),
 				}).
-				Delete().
+				Deleted().
 				Obj(),
 			wantError:          nil,
 			wantWorkloadCached: false,
@@ -2955,7 +2955,7 @@ func TestFinalize(t *testing.T) {
 					Status:             metav1.ConditionTrue,
 					LastTransitionTime: metav1.NewTime(testStartTime.Add(-2 * util.LongTimeout)),
 				}).
-				Delete().
+				Deleted().
 				Obj(),
 			wantError:          nil,
 			wantWorkloadCached: false,
@@ -2981,7 +2981,7 @@ func TestFinalize(t *testing.T) {
 					Status:             metav1.ConditionTrue,
 					LastTransitionTime: metav1.NewTime(testStartTime.Add(-2 * util.LongTimeout)),
 				}).
-				Delete().
+				Deleted().
 				Obj(),
 			wantError:          schdcache.ErrCqNotFound,
 			wantWorkloadCached: false,

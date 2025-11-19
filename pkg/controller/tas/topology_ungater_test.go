@@ -57,9 +57,9 @@ const (
 var (
 	podCmpOpts = []gocmp.Option{
 		cmpopts.EquateEmpty(),
-		cmpopts.IgnoreFields(corev1.Pod{}, "TypeMeta", "ObjectMeta.ResourceVersion",
-			"ObjectMeta.DeletionTimestamp"),
+		cmpopts.IgnoreFields(corev1.Pod{}, "TypeMeta", "ObjectMeta.ResourceVersion"),
 		cmpopts.IgnoreFields(corev1.PodCondition{}, "LastTransitionTime"),
+		cmpopts.IgnoreFields(kueue.Workload{}, "ObjectMeta.DeletionTimestamp"),
 	}
 	defaultTestLevels = []string{
 		tasBlockLabel,

@@ -230,8 +230,7 @@ func TestPodSets(t *testing.T) {
 var (
 	podCmpOpts = cmp.Options{
 		cmpopts.EquateEmpty(),
-		cmpopts.IgnoreFields(corev1.Pod{}, "TypeMeta", "ObjectMeta.ResourceVersion",
-			"ObjectMeta.DeletionTimestamp"),
+		cmpopts.IgnoreFields(corev1.Pod{}, "TypeMeta", "ObjectMeta.ResourceVersion", "ObjectMeta.DeletionTimestamp"),
 		cmpopts.IgnoreFields(corev1.PodCondition{}, "LastTransitionTime"),
 	}
 	defaultWorkloadCmpOpts = cmp.Options{
@@ -358,7 +357,7 @@ func TestReconciler(t *testing.T) {
 			},
 			wantWorkloads: []kueue.Workload{
 				*utiltestingapi.MakeWorkload("unit-test", "ns").
-					DeletionTimestamp(testStartTime).
+					Deleted().
 					PodSets(*utiltestingapi.MakePodSet(kueue.DefaultPodSetName, 2).Request(corev1.ResourceCPU, "1").Obj()).
 					ReserveQuota(utiltestingapi.MakeAdmission("cq").PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).Obj()).Obj()).
 					ControllerReference(corev1.SchemeGroupVersion.WithKind("Pod"), "pod", "test-uid").
@@ -1585,7 +1584,7 @@ func TestReconciler(t *testing.T) {
 			},
 			wantWorkloads: []kueue.Workload{
 				*utiltestingapi.MakeWorkload("test-group", "ns").
-					DeletionTimestamp(testStartTime).
+					Deleted().
 					PodSets(*utiltestingapi.MakePodSet(kueue.NewPodSetReference(podUID), 2).Request(corev1.ResourceCPU, "1").Obj()).
 					OwnerReference(corev1.SchemeGroupVersion.WithKind("Pod"), "pod", "test-uid").
 					OwnerReference(corev1.SchemeGroupVersion.WithKind("Pod"), "pod2", "test-uid").
@@ -1601,7 +1600,7 @@ func TestReconciler(t *testing.T) {
 					Admitted(true).
 					Obj(),
 			},
-			workloadCmpOpts: append(defaultWorkloadCmpOpts, cmpopts.IgnoreFields(kueue.Workload{}, "ObjectMeta.DeletionTimestamp")),
+			workloadCmpOpts: defaultWorkloadCmpOpts,
 			deleteWorkloads: true,
 			wantEvents: []utiltesting.EventRecord{
 				{

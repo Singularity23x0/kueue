@@ -393,7 +393,7 @@ func (w *WorkloadWrapper) DeletionTimestamp(t time.Time) *WorkloadWrapper {
 	return w
 }
 
-func (w *WorkloadWrapper) Delete() *WorkloadWrapper {
+func (w *WorkloadWrapper) Deleted() *WorkloadWrapper {
 	return w.DeletionTimestamp(time.Now())
 }
 

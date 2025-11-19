@@ -553,7 +553,7 @@ func TestUpdateConfig(t *testing.T) {
 
 func TestRemoteClientGC(t *testing.T) {
 	baseJobBuilder := testingjob.MakeJob("job1", TestNamespace)
-	baseWlBuilder := utiltestingapi.MakeWorkload("wl1", TestNamespace).Finalizers().ControllerReference(batchv1.SchemeGroupVersion.WithKind("Job"), "job1", "test-uuid")
+	baseWlBuilder := utiltestingapi.MakeWorkload("wl1", TestNamespace).ControllerReference(batchv1.SchemeGroupVersion.WithKind("Job"), "job1", "test-uuid")
 
 	cases := map[string]struct {
 		managersWorkloads []kueue.Workload
@@ -592,9 +592,15 @@ func TestRemoteClientGC(t *testing.T) {
 					Obj(),
 			},
 		},
-		"missing worker workloads are deleted": {
+		"missing worker workloads are marked for deletion": {
 			workersWorkloads: []kueue.Workload{
 				*baseWlBuilder.Clone().
+					Label(kueue.MultiKueueOriginLabel, defaultOrigin).
+					Obj(),
+			},
+			wantWorkersWorkloads: []kueue.Workload{
+				*baseWlBuilder.Clone().
+					Deleted().
 					Label(kueue.MultiKueueOriginLabel, defaultOrigin).
 					Obj(),
 			},
@@ -610,10 +616,23 @@ func TestRemoteClientGC(t *testing.T) {
 					Label(kueue.MultiKueueOriginLabel, defaultOrigin).
 					Obj(),
 			},
+			wantWorkersWorkloads: []kueue.Workload{
+				*baseWlBuilder.Clone().
+					Deleted().
+					ControllerReference(batchv1.SchemeGroupVersion.WithKind("NptAJob"), "job1", "test-uuid").
+					Label(kueue.MultiKueueOriginLabel, defaultOrigin).
+					Obj(),
+			},
 		},
-		"missing worker workloads and their owner jobs are deleted": {
+		"missing worker workloads are marked for deletion and their owner jobs are deleted": {
 			workersWorkloads: []kueue.Workload{
 				*baseWlBuilder.Clone().
+					Label(kueue.MultiKueueOriginLabel, defaultOrigin).
+					Obj(),
+			},
+			wantWorkersWorkloads: []kueue.Workload{
+				*baseWlBuilder.Clone().
+					Deleted().
 					Label(kueue.MultiKueueOriginLabel, defaultOrigin).
 					Obj(),
 			},
@@ -651,6 +670,7 @@ func TestRemoteClientGC(t *testing.T) {
 	objCheckOpts := cmp.Options{
 		cmpopts.IgnoreFields(metav1.ObjectMeta{}, "ResourceVersion"),
 		cmpopts.EquateEmpty(),
+		cmpopts.IgnoreFields(kueue.Workload{}, "ObjectMeta.DeletionTimestamp"),
 	}
 
 	for name, tc := range cases {
