@@ -39,6 +39,7 @@ func newPendingWorkload(wlInfo *workload.Info, positionInLq int32, positionInCq 
 			Namespace:         wlInfo.Obj.Namespace,
 			OwnerReferences:   ownerReferences,
 			CreationTimestamp: wlInfo.Obj.CreationTimestamp,
+			Finalizers:        wlInfo.Obj.Finalizers,
 		},
 		PositionInClusterQueue: int32(positionInCq),
 		Priority:               *wlInfo.Obj.Spec.Priority,
