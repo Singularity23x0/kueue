@@ -1,3 +1,84 @@
+## v0.15.6
+
+Changes since `v0.15.5`:
+
+## Changes by Kind
+
+### Feature
+
+- Observability: Add scheduler logs for the scheduling cycle phase boundaries. (#9815, @sohankunkerkar)
+- Scheduling: Add the alpha SchedulerLongRequeueInterval feature gate (disabled by default) to increase the 
+  inadmissible workload requeue interval from 1s to 10s. This may help to mitigate, on large environments with 
+  many pending workloads, issues with frequent re-queues that prevent the scheduler from reaching schedulable 
+  workloads deeper in the queue and result in constant re-evaluation of the same top workloads. (#9820, @mbobrovskyi)
+- Scheduling: Add the alpha SchedulerTimestampPreemptionBuffer feature gate (disabled by default) to use
+  5-minute buffer so that workloads with scheduling timestamps within this buffer don’t preempt each other
+  based on LowerOrNewerEqualPriority. (#9838, @mbobrovskyi)
+
+### Bug or Regression
+
+- FailureRecoveryPolicy: forcefully delete stuck pods (without grace period) in addition to transitioning them
+  to the `Failed` phase. This fixes a scenario where foreground propagating deletions were blocked by a stuck pod. (#9672, @kshalot)
+- Fix a race where updated workload priority could remain stuck in the inadmissible queue and delay rescheduling. (#9661, @sohankunkerkar)
+- In fair sharing preemption, bypass DRS strategy gates when the preemptor ClusterQueue is within nominal quota for contested resources, allowing preemption even if the CQ's aggregate DRS is high due to borrowing on other flavors. (#9593, @mukund-wayve)
+- Kueueviz: fetch Cohort CRD directly, instead of deriving from ClusterQueue (#9744, @samzong)
+- LeaderWorkerSet: fix workload recreation delay during rolling updates by watching for workload deletions. (#9631, @PannagaRao)
+- Scheduling: Fix a BestEffortFIFO performance issue where many equivalent workloads could
+  prevent the scheduler from reaching schedulable workloads deeper in the queue. Kueue now
+  skips redundant evaluation by bulk-moving same-hash workloads to inadmissible when one
+  representative is categorized as NoFit. (#9698, @sohankunkerkar)
+- Scheduling: Fix that the Kueue's scheduler could issue duplicate preemption requests and events for the same workload. (#9641, @sohankunkerkar)
+- Scheduling: Fixed a race condition where a workload could simultaneously exist in the scheduler's heap
+  and the "inadmissible workloads" list. This fix prevents unnecessary scheduler cycles and prevents temporary 
+  double counting for the metric of pending workloads. (#9639, @sohankunkerkar)
+- Scheduling: Reduced the maximum sleep time between scheduling cycles from 100ms to 10ms.
+  This change fixes a bug where the 100ms delay was excessive on busy systems, in which completed
+  workloads can trigger requeue events every second. In such cases, the scheduler could spend up to 10%
+  of the time between requeue events sleeping. Reducing the delay allows the scheduler to spend more time
+  progressing through the ClusterQueue heap between requeue events. (#9762, @mimowo)
+- StatefulSet integration: fix the bug that when using `generateName` the Workload names generated
+  for two different StatefulSets would conflict, not allowing to run the second StatefulSet. (#9695, @IrvingMg)
+- TAS: Fix performance bug where snapshotting would take very long due to List and DeepCopy
+  of all Nodes. Now the cached set of nodes is maintained in event-driven fashion. (#9786, @mbobrovskyi)
+- TAS: support ResourceTransformations to define "virtual" resources which allow putting a cap on
+  some "virtual" credits across multiple-flavors, see [sharing quotas](https://kueue.sigs.k8s.io/docs/tasks/manage/share_quotas_across_flavors/) for quota-only resources.
+  This is considered a bug since there was no validation preventing such configuration before. (#9691, @mbobrovskyi)
+- VisibilityOnDemand: Fix the bug that when running Kueue with the custom `--kubeconfig` flag the visibility server
+  fails to initialize, because the custom value of the flag is not propagated to it, leading to errors such as:
+  "Unable to create and start visibility server","error":"unable to apply VisibilityServerOptions: failed to get delegated authentication kubeconfig:  failed to get delegated authentication kubeconfig: ..." (#9806, @Nilsachy)
+
+## v0.15.5
+
+Changes since `v0.15.4`:
+
+## Changes by Kind
+
+### Feature
+
+- KueueViz Helm: Add podSecurityContext and containerSecurityContext configuration options to KueueViz Helm chart for restricted pod security profile compliance (#9320, @ziadmoubayed)
+- Observability: Increased the maximum finite bucket boundary for admission_wait_time_seconds histogram from ~2.84 hours to ~11.3 hours for better observability of long queue times. (#9530, @mukund-wayve)
+- TAS: Introduce the TASReplaceNodeOnNodeTaints feature gate (alpha) to allow TAS workloads to be evicted or replaced when a node is tainted with NoExecute. (#9441, @j-skiba)
+
+### Bug or Regression
+
+- ElasticJobs: fix the temporary double-counting of quota during workload replacement. 
+  In particular it was causing double-counting of quota requests for unchanged PodSets. (#9365, @benkermani)
+- FairSharing: workloads fitting within their ClusterQueue's nominal quota are now preferred over workloads that require borrowing, preventing heavy borrowing on one flavor from deprioritizing a CQ's nominal entitlement on another flavor. (#9533, @mukund-wayve)
+- Fix non-deterministic workload ordering in ClusterQueue by adding UID tie-breaker to queue ordering function. (#9164, @sohankunkerkar)
+- Fix serverName substitution in kustomize prometheus ServiceMonitor TLS patch for cert-manager deployments. (#9190, @IrvingMg)
+- Fixed invalid field name in the `ClusterQueue` printer columns. The "Cohort" column will now correctly display the assigned cohort in kubectl, k9s, and other UI tools instead of being blank. (#9447, @polinasand)
+- Fixed the bug that prevented managing workloads with duplicated environment variable names in initContainers. This issue manifested when creating the Workload via the API. (#9127, @monabil08)
+- LeaderWorkerSet: fix an occasional race condition resulting in workload deletion getting stuck during scale down. (#9135, @PannagaRao)
+- MultiKueue: Fix a bug that the remote Job object was occasionally left by MultiKueue GC, 
+  even when the corresponding Job object on the management cluster was deleted.
+  This issue was observed for LeaderWorkerSet. (#9309, @sohankunkerkar)
+- Scheduling: Fix the bug where inadmissible workloads would be re-queued too frequently at scale.
+  This resulted in excessive processing, lock contention, and starvation of workloads deeper in the queue.
+  The fix is to throttle the process with a batch period of 1s per CQ or Cohort. (#9232, @gabesaba)
+- TAS: Fix a bug that LeaderWorkerSet with multiple PodTemplates (`.spec.leaderWorkerTemplate.leaderTemplate` and `.spec.leaderWorkerTemplate.workerTemplate`), Pod indexes are not correctly evaluated during rank-based ordering assignments. (#9369, @tenzen-y)
+- TAS: fix a bug where NodeHotSwap may assign a Pod, based on rank-ordering, to a node which is already
+  occupied by another running Pod. (#9283, @j-skiba)
+
 ## v0.15.4
 
 Changes since `v0.15.3`:

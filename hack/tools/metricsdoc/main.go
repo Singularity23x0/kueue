@@ -25,6 +25,7 @@ import (
 	"go/token"
 	"maps"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -78,106 +79,191 @@ func main() {
 	}
 }
 
+type varMarker struct {
+	group     string
+	labelDocs map[string]string
+}
+
 func extractMetricsFromPackage(dir string) ([]Metric, error) {
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, dir, nil, parser.ParseComments)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
+	var files []*ast.File
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, filepath.Join(dir, e.Name()), nil, parser.ParseComments)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, f)
+	}
+
+	// Collect markers from type-only var declarations (no initializer).
+	deferred := map[string]varMarker{}
+	for _, f := range files {
+		ast.Inspect(f, func(n ast.Node) bool {
+			vs, ok := n.(*ast.ValueSpec)
+			if !ok || len(vs.Values) != 0 || len(vs.Names) == 0 {
+				return true
+			}
+			group, labelDocs := parseMarkers(vs)
+			if group == "" {
+				return true
+			}
+			deferred[vs.Names[0].Name] = varMarker{group: group, labelDocs: labelDocs}
+			return true
+		})
+	}
+
 	var all []Metric
 	var missingGroups []string
-	for _, pkg := range pkgs {
-		for _, f := range pkg.Files {
-			ast.Inspect(f, func(n ast.Node) bool {
-				vs, ok := n.(*ast.ValueSpec)
-				if !ok || len(vs.Values) != 1 {
-					return true
-				}
-				groupFromComment, labelDocs := parseMarkers(vs)
-				call, ok := vs.Values[0].(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				sel, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				pkgIdent, ok := sel.X.(*ast.Ident)
-				if !ok || pkgIdent.Name != "prometheus" {
-					return true
-				}
-				fun := sel.Sel.Name
-				if fun != "NewCounterVec" && fun != "NewGaugeVec" && fun != "NewHistogramVec" {
-					return true
-				}
-				if len(call.Args) < 2 {
-					return true
-				}
-				opts, ok := call.Args[0].(*ast.CompositeLit)
-				if !ok {
-					return true
-				}
-				var name, help string
-				for _, elt := range opts.Elts {
-					kv, ok := elt.(*ast.KeyValueExpr)
-					if !ok {
-						continue
-					}
-					var keyName string
-					switch k := kv.Key.(type) {
-					case *ast.Ident:
-						keyName = k.Name
-					case *ast.SelectorExpr:
-						keyName = k.Sel.Name
-					default:
-						keyName = exprToString(kv.Key)
-					}
-					switch keyName {
-					case "Name":
-						name = stringLiteral(kv.Value)
-					case "Help":
-						help = stringLiteral(kv.Value)
-					}
-				}
-				labels := parseLabels(call.Args[1])
-				m := Metric{
-					FullName:  "kueue_" + name,
-					Type:      map[string]string{"NewCounterVec": "Counter", "NewGaugeVec": "Gauge", "NewHistogramVec": "Histogram"}[fun],
-					Help:      normalizeHelp(help),
-					Labels:    labels,
-					LabelDocs: labelDocs,
-				}
-				if groupFromComment == "" {
-					varName := ""
-					if len(vs.Names) > 0 && vs.Names[0] != nil {
-						varName = vs.Names[0].Name
-					}
-					missingGroups = append(missingGroups, varName)
-					return true
-				}
-				m.Group = groupFromComment
-				all = append(all, m)
+
+	// Extract from inline-initialized vars.
+	for _, f := range files {
+		ast.Inspect(f, func(n ast.Node) bool {
+			vs, ok := n.(*ast.ValueSpec)
+			if !ok || len(vs.Values) != 1 {
 				return true
-			})
-		}
+			}
+			groupFromComment, labelDocs := parseMarkers(vs)
+			m, ok := metricFromCall(vs.Values[0])
+			if !ok {
+				return true
+			}
+			m.LabelDocs = labelDocs
+			if groupFromComment == "" {
+				varName := ""
+				if len(vs.Names) > 0 && vs.Names[0] != nil {
+					varName = vs.Names[0].Name
+				}
+				missingGroups = append(missingGroups, varName)
+				return true
+			}
+			m.Group = groupFromComment
+			all = append(all, m)
+			return true
+		})
 	}
+
+	// Scan function bodies for assignments to deferred vars.
+	for _, f := range files {
+		ast.Inspect(f, func(n ast.Node) bool {
+			assign, ok := n.(*ast.AssignStmt)
+			if !ok || len(assign.Lhs) != 1 || len(assign.Rhs) != 1 {
+				return true
+			}
+			ident, ok := assign.Lhs[0].(*ast.Ident)
+			if !ok {
+				return true
+			}
+			marker, found := deferred[ident.Name]
+			if !found {
+				return true
+			}
+			m, ok := metricFromCall(assign.Rhs[0])
+			if !ok {
+				return true
+			}
+			m.Group = marker.group
+			m.LabelDocs = marker.labelDocs
+			all = append(all, m)
+			delete(deferred, ident.Name)
+			return true
+		})
+	}
+
 	if len(missingGroups) > 0 {
 		return nil, fmt.Errorf("missing metricsdoc:group marker on metrics: %s", strings.Join(missingGroups, ", "))
+	}
+	if len(deferred) > 0 {
+		names := slices.Sorted(maps.Keys(deferred))
+		return nil, fmt.Errorf("missing assignment for metrics with metricsdoc markers: %s", strings.Join(names, ", "))
 	}
 	// stable sort within package groups is applied later in render
 	return all, nil
 }
 
-func parseLabels(arg ast.Expr) []string {
-	var labels []string
-	cl, ok := arg.(*ast.CompositeLit)
+func metricFromCall(expr ast.Expr) (Metric, bool) {
+	call, ok := expr.(*ast.CallExpr)
 	if !ok {
+		return Metric{}, false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		// Unwrap single-argument wrapper (e.g. trackGaugeVec(prometheus.NewGaugeVec(...))).
+		if len(call.Args) == 1 {
+			return metricFromCall(call.Args[0])
+		}
+		return Metric{}, false
+	}
+	pkgIdent, ok := sel.X.(*ast.Ident)
+	if !ok || pkgIdent.Name != "prometheus" {
+		if len(call.Args) == 1 {
+			return metricFromCall(call.Args[0])
+		}
+		return Metric{}, false
+	}
+	fun := sel.Sel.Name
+	if fun != "NewCounterVec" && fun != "NewGaugeVec" && fun != "NewHistogramVec" {
+		return Metric{}, false
+	}
+	if len(call.Args) < 2 {
+		return Metric{}, false
+	}
+	opts, ok := call.Args[0].(*ast.CompositeLit)
+	if !ok {
+		return Metric{}, false
+	}
+	var name, help string
+	for _, elt := range opts.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		var keyName string
+		switch k := kv.Key.(type) {
+		case *ast.Ident:
+			keyName = k.Name
+		case *ast.SelectorExpr:
+			keyName = k.Sel.Name
+		default:
+			keyName = exprToString(kv.Key)
+		}
+		switch keyName {
+		case "Name":
+			name = stringLiteral(kv.Value)
+		case "Help":
+			help = stringLiteral(kv.Value)
+		}
+	}
+	labels := parseLabels(call.Args[1])
+	return Metric{
+		FullName: "kueue_" + name,
+		Type:     map[string]string{"NewCounterVec": "Counter", "NewGaugeVec": "Gauge", "NewHistogramVec": "Histogram"}[fun],
+		Help:     normalizeHelp(help),
+		Labels:   labels,
+	}, true
+}
+
+func parseLabels(arg ast.Expr) []string {
+	switch v := arg.(type) {
+	case *ast.CompositeLit:
+		var labels []string
+		for _, elt := range v.Elts {
+			labels = append(labels, stringLiteral(elt))
+		}
 		return labels
+	case *ast.CallExpr:
+		// Extract only the static labels from append(base, dynamic...) calls.
+		if ident, ok := v.Fun.(*ast.Ident); ok && ident.Name == "append" && len(v.Args) >= 1 {
+			return parseLabels(v.Args[0])
+		}
 	}
-	for _, elt := range cl.Elts {
-		labels = append(labels, stringLiteral(elt))
-	}
-	return labels
+	return nil
 }
 
 func stringLiteral(e ast.Expr) string {

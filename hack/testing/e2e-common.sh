@@ -20,6 +20,7 @@ export KIND="$ROOT_DIR"/bin/kind
 export YQ="$ROOT_DIR"/bin/yq
 export HELM="$ROOT_DIR"/bin/helm
 export KUEUE_NAMESPACE="${KUEUE_NAMESPACE:-kueue-system}"
+export KUEUE_DEPLOYMENT_NAME="kueue-controller-manager"
 
 # E2E_MODE controls e2e cluster lifecycle behavior:
 # - ci  (default): create cluster(s), run tests, delete cluster(s)
@@ -32,6 +33,9 @@ fi
 
 # When set (truthy), external operators are forcefully re-installed_version even in E2E_MODE=dev.
 export E2E_ENFORCE_OPERATOR_UPDATE="${E2E_ENFORCE_OPERATOR_UPDATE:-false}"
+
+# When set to value "true", skip Kueue re-install in E2E_MODE=dev if the controller deployment already exists.
+export E2E_SKIP_REINSTALL="${E2E_SKIP_REINSTALL:-false}"
 
 export KIND_VERSION="${E2E_KIND_VERSION/"kindest/node:v"/}"
 
@@ -130,6 +134,10 @@ if [[ -n ${LEADERWORKERSET_VERSION:-} && ("$GINKGO_ARGS" =~ feature:leaderworker
     export LEADERWORKERSET_IMAGE=registry.k8s.io/lws/lws:${LEADERWORKERSET_VERSION}
 fi
 
+if [[ -n ${SPARKOPERATOR_VERSION:-} ]]; then
+    export SPARKOPERATOR_IMAGE="ghcr.io/kubeflow/spark-operator/controller:${SPARKOPERATOR_VERSION#v}"
+fi
+
 if [[ -n "${CERTMANAGER_VERSION:-}" ]]; then
     export CERTMANAGER_MANIFEST="https://github.com/cert-manager/cert-manager/releases/download/${CERTMANAGER_VERSION}/cert-manager.yaml"
 fi
@@ -137,6 +145,10 @@ fi
 if [[ -n "${CLUSTERPROFILE_VERSION:-}" ]]; then
     export CLUSTERPROFILE_CRD=${ROOT_DIR}/dep-crds/clusterprofile/multicluster.x-k8s.io_clusterprofiles.yaml
     export CLUSTERPROFILE_PLUGIN_IMAGE=us-central1-docker.pkg.dev/k8s-staging-images/kueue/secretreader-plugin:${CLUSTERPROFILE_PLUGIN_IMAGE_VERSION}
+fi
+
+if [[ -n "${PROMETHEUS_OPERATOR_VERSION:-}" ]]; then
+    export PROMETHEUS_OPERATOR_BUNDLE="https://github.com/prometheus-operator/prometheus-operator/releases/download/${PROMETHEUS_OPERATOR_VERSION}/bundle.yaml"
 fi
 
 if [[ -n "${DRA_EXAMPLE_DRIVER_VERSION:-}" ]]; then
@@ -159,7 +171,43 @@ export E2E_TEST_AGNHOST_IMAGE=${E2E_TEST_AGNHOST_IMAGE_WITH_SHA%%@*}
 
 # $1 cluster name
 function cluster_cleanup {
-    $KIND delete cluster --name "$1"
+    local cluster_name="$1"
+    local max_retries=5
+    local retry_delay=1
+
+    for attempt in $(seq 1 "$max_retries"); do
+        local output
+        if output=$($KIND delete cluster --name "$cluster_name" 2>&1); then
+            echo "$output"
+            return 0
+        fi
+        echo "$output"
+
+        if [[ "$output" == *"unknown cluster"* ]]; then
+            echo "Cluster '$cluster_name' is already deleted (unknown cluster)."
+            return 0
+        fi
+
+        if [ "$attempt" -eq "$max_retries" ]; then
+            break
+        fi
+
+        echo "WARNING: kind delete cluster '$cluster_name' failed (attempt $attempt/$max_retries)."
+
+        # Retry kind deletion to work around Docker race conditions where
+        # delete can fail before receiving the container exit event.
+        # Upstream bugs:
+        # - https://github.com/moby/moby/issues/51028
+        # - https://github.com/moby/moby/issues/51845
+        # This workaround can be revisited after upstream fixes are available.
+
+        echo "Retrying in ${retry_delay}s..."
+        sleep "$retry_delay"
+        retry_delay=$((retry_delay * 2))
+    done
+
+    echo "ERROR: Failed to delete kind cluster '$cluster_name' after $max_retries attempts."
+    return 1
 }
 
 # $1 cluster name
@@ -271,7 +319,7 @@ controllerManager:
 apiServer:
   extraArgs:
     enable-aggregator-routing: \"true\"
-    runtime-config: \"scheduling.k8s.io/v1alpha1=true\"
+    runtime-config: \"scheduling.k8s.io/v1alpha2=true\"
     v: \"3\"
 "' "$patched_config"
 
@@ -353,6 +401,9 @@ function prepare_docker_images {
     if [[ -n ${KUEUE_UPGRADE_FROM_VERSION:-} ]]; then
         docker pull "${KUEUE_OLD_VERSION_IMAGE}"
     fi
+    if [[ -n ${SPARKOPERATOR_VERSION:-} ]]; then
+        docker pull "${SPARKOPERATOR_IMAGE}"
+    fi
 }
 
 # $1 cluster
@@ -402,8 +453,14 @@ function kind_load {
     if [[ -n ${KUBERAY_VERSION:-} && ("$GINKGO_ARGS" =~ feature:kuberay || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
         install_kuberay "${e2e_cluster_name}" "${e2e_kubeconfig}"
     fi
+    if [[ -n ${SPARKOPERATOR_VERSION:-} ]]; then
+        install_sparkoperator "$1" "$2"
+    fi
     if [[ -n ${CERTMANAGER_VERSION:-} ]]; then
         install_cert_manager "${e2e_kubeconfig}"
+    fi
+    if [[ -n ${PROMETHEUS_OPERATOR_VERSION:-} && ("$GINKGO_ARGS" =~ feature:prometheus || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
+        install_prometheus_operator "${e2e_kubeconfig}"
     fi
     if [[ -n ${CLUSTERPROFILE_VERSION:-} ]]; then
         install_multicluster "${e2e_kubeconfig}"
@@ -413,6 +470,10 @@ function kind_load {
     fi
 }
 
+# Save image to a temp file once, then load into all worker nodes in parallel.
+# Using docker save + ctr import directly to avoid the --all-platforms
+# issue with multi-arch images in DinD environments.
+# See: https://github.com/kubernetes-sigs/kind/issues/3795
 # $1 cluster
 # $2 image
 function cluster_kind_load_image {
@@ -423,17 +484,36 @@ function cluster_kind_load_image {
         return 1
     fi
 
-    # Use docker save + ctr import directly to avoid the --all-platforms
-    # issue with multi-arch images in DinD environments.
-    # See: https://github.com/kubernetes-sigs/kind/issues/3795
-    echo "Loading image '$2' to cluster '$1'"
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    trap '[ -d "${tmp_dir:-}" ] && rm -rf "$tmp_dir"' RETURN
+    local tmp_image="$tmp_dir/image.tar"
+
+    echo "Saving image '$2'..."
+    if ! docker save "$2" -o "$tmp_image"; then
+        echo "Failed to save image '$2'"
+        return 1
+    fi
+
+    echo "Loading image '$2' to cluster '$1' (parallel)"
+    local pids=()
+    local nodes=()
     while IFS= read -r node; do
         echo "  Loading image to node: $node"
-        if ! docker save "$2" | docker exec -i "$node" ctr --namespace=k8s.io images import --digests --snapshotter=overlayfs -; then
-            echo "Failed to load image '$2' to node '$node'"
-            return 1
-        fi
+        docker exec -i "$node" ctr --namespace=k8s.io images import \
+            --digests --snapshotter=overlayfs - < "$tmp_image" &
+        pids+=($!)
+        nodes+=("$node")
     done <<< "$worker_nodes"
+
+    local failed=0
+    for i in "${!pids[@]}"; do
+        if ! wait "${pids[$i]}"; then
+            echo "Failed to load image '$2' to node '${nodes[$i]}'"
+            failed=1
+        fi
+    done
+    return "$failed"
 }
 
 # $1 kubeconfig
@@ -477,6 +557,15 @@ function cluster_kueue_deploy {
         upgrade_test_flow "$1"
         return
     fi
+
+    if [[ "${E2E_MODE}" == "dev" && "${E2E_SKIP_REINSTALL}" == "true" ]]; then
+        if e2e_deployment_exists "$1" "${KUEUE_NAMESPACE}" "${KUEUE_DEPLOYMENT_NAME}"; then
+            echo "Kueue controller already exists in namespace '${KUEUE_NAMESPACE}', skipping reinstall"
+            return
+        fi
+        echo "E2E_SKIP_REINSTALL is enabled in E2E_MODE=dev but Kueue is not deployed yet; proceeding with install"
+    fi
+
     # Normal deployment flows
     if [[ -n ${CERTMANAGER_VERSION:-} ]]; then
         kubectl -n cert-manager wait --for condition=ready pod \
@@ -519,7 +608,7 @@ function build_and_apply_kueue_manifests {
 
     # Use --force-conflicts when Kueue is already deployed to handle SSA conflicts when reapplying.
     local force_conflicts=""
-    if kubectl get deployment kueue-controller-manager -n "${KUEUE_NAMESPACE}" --kubeconfig="$1" >/dev/null 2>&1; then
+    if kubectl get deployment "${KUEUE_DEPLOYMENT_NAME}" -n "${KUEUE_NAMESPACE}" --kubeconfig="$1" >/dev/null 2>&1; then
         echo "Kueue controller already exists, using --force-conflicts"
         force_conflicts="--force-conflicts"
     fi
@@ -722,14 +811,7 @@ function install_mpi {
     fi
 
     cluster_kind_load_image "${name}" "${KUBEFLOW_MPI_IMAGE/#v}"
-    # NOTE: When reusing an existing cluster (E2E_MODE=dev), aggregated ClusterRoles may already have
-    # their `.rules` field managed by the `clusterrole-aggregation-controller`. The upstream MPI
-    # operator manifest can include `rules: []` for such ClusterRoles, which causes SSA conflicts.
-    #
-    # To keep installs idempotent without `--force-conflicts`, drop empty `rules: []` only for
-    # ClusterRoles that define an `aggregationRule`.
     curl -sSL "${KUBEFLOW_MPI_MANIFEST}" \
-        | $YQ eval '(. | select(.kind == "ClusterRole" and has("aggregationRule"))) |= del(.rules | select(length == 0))' - \
         | kubectl apply --kubeconfig="${kubeconfig}" --server-side -f -
     kubectl wait --kubeconfig="${kubeconfig}" deploy/"${deployment_name}" -n "${ns}" --for=condition=available --timeout=5m || true
 }
@@ -825,6 +907,49 @@ function install_lws {
     kubectl wait --kubeconfig="${kubeconfig}" deploy/"${deployment_name}" -n "${ns}" --for=condition=available --timeout=5m || true
 }
 
+# $1 cluster name
+# $2 kubeconfig option
+function install_sparkoperator {
+    local cluster_name=$1
+    local kubeconfig=${2:-}
+    local ns="${SPARKOPERATOR_NAMESPACE:-spark-operator}"
+    local helm_release_name="${SPARKOPERATOR_HELM_RELEASE_NAME:-spark-operator}"
+    local expected_version="${SPARKOPERATOR_VERSION:-}"
+    expected_version="${expected_version#v}"
+    local install_cmd="install"
+    cluster_kind_load_image "${cluster_name}" "${SPARKOPERATOR_IMAGE}"
+
+    ${HELM} repo add --force-update spark-operator https://kubeflow.github.io/spark-operator
+
+    if [[ "${E2E_MODE}" == "dev" ]] && e2e_is_truthy "${E2E_ENFORCE_OPERATOR_UPDATE}" ; then
+        if helm list --namespace "${ns}" | grep -q "${helm_release_name}"; then
+            local installed_version=""
+            installed_version=$(helm get values --namespace="${ns}" "${helm_release_name}" -o json | jq -r '.image.tag')
+            if [[ -n "${installed_version}" ]] && { [[ -z "${expected_version}" ]] || e2e_versions_match "${installed_version}" "${expected_version}"; }; then
+                echo "Spark operator already installed (${installed_version}); skipping install (E2E_MODE=dev)."
+                return 0
+            fi
+            install_cmd="upgrade"
+            if [[ -n "${installed_version}" && -n "${expected_version}" ]]; then
+                echo "Spark operator installed version (${installed_version}) does not match requested (${expected_version}); upgrading."
+            else
+                echo "Spark operator already present; upgrading."
+            fi
+        else 
+            echo "Spark operator helm release not found; installing."
+        fi
+    fi
+
+    ${HELM} --kubeconfig="${kubeconfig}" \
+    ${install_cmd} "${helm_release_name}" spark-operator/spark-operator \
+    --version "${expected_version}" \
+    --namespace "${ns}" \
+    --create-namespace \
+    --wait \
+    --set image.tag="${expected_version}" \
+    --set 'spark.jobNamespaces[0]='
+}
+
 # $1 kubeconfig option
 function install_cert_manager {
     local kubeconfig=${1:-}
@@ -862,6 +987,48 @@ function install_cert_manager {
     kubectl wait --kubeconfig="${kubeconfig}" deploy/cert-manager -n "${ns}" --for=condition=available --timeout=5m
     kubectl wait --kubeconfig="${kubeconfig}" deploy/cert-manager-webhook -n "${ns}" --for=condition=available --timeout=5m || true
     kubectl wait --kubeconfig="${kubeconfig}" deploy/cert-manager-cainjector -n "${ns}" --for=condition=available --timeout=5m || true
+}
+
+# $1 kubeconfig option
+function install_prometheus_operator {
+    local kubeconfig=${1:-}
+    local ns="default"
+    local deployment_name="prometheus-operator"
+    local expected_version="${PROMETHEUS_OPERATOR_VERSION:-}"
+
+    if [[ "${E2E_MODE}" == "dev" ]] && e2e_is_truthy "${E2E_ENFORCE_OPERATOR_UPDATE}"; then
+        if e2e_deployment_exists "${kubeconfig}" "${ns}" "${deployment_name}"; then
+            local installed_version=""
+            local img=""
+            img=$(kubectl --kubeconfig="${kubeconfig}" -n "${ns}" get deployment "${deployment_name}" \
+                -o jsonpath='{.spec.template.spec.containers[?(@.name=="prometheus-operator")].image}' 2>/dev/null || true)
+            installed_version=$(e2e_image_ref_get_tag "${img}" || true)
+            if [[ -n "${installed_version}" ]] && { [[ -z "${expected_version}" ]] || e2e_versions_match "${installed_version}" "${expected_version}"; }; then
+                echo "Prometheus operator already installed (${installed_version}); skipping install (E2E_MODE=dev)."
+                return 0
+            fi
+            if [[ -n "${installed_version}" && -n "${expected_version}" ]]; then
+                echo "Prometheus operator installed version (${installed_version}) does not match requested (${expected_version}); reinstalling."
+            else
+                echo "Prometheus operator already present; reinstalling."
+            fi
+        else
+            echo "Prometheus operator deployment not found; installing."
+        fi
+    fi
+
+    kubectl apply --kubeconfig="${kubeconfig}" --server-side -f "${PROMETHEUS_OPERATOR_BUNDLE}"
+    kubectl wait deploy/"${deployment_name}" -n "${ns}" \
+        --for=condition=available --timeout=5m --kubeconfig="${kubeconfig}"
+    kubectl apply --kubeconfig="${kubeconfig}" --server-side \
+        -f "${ROOT_DIR}/test/e2e/config/prometheus/prometheus-setup.yaml"
+}
+
+# $1 kubeconfig option
+function deploy_kueue_prometheus_config {
+    local kubeconfig=${1:-}
+    $KUSTOMIZE build "${ROOT_DIR}/config/prometheus" | \
+        kubectl apply --kubeconfig="${kubeconfig}" --server-side -f -
 }
 
 # $1 kubeconfig option
@@ -1026,7 +1193,7 @@ function upgrade_test_flow {
       sed 's|imagePullPolicy: Always|imagePullPolicy: IfNotPresent|g' | \
       kubectl apply --server-side -f -
 
-    kubectl wait --for=condition=available --timeout=180s deployment/kueue-controller-manager -n kueue-system
+    kubectl wait --for=condition=available --timeout=180s deployment/"${KUEUE_DEPLOYMENT_NAME}" -n kueue-system
     echo "✓ $old_version ready"
     
     # Step 2: Create test resources
@@ -1090,7 +1257,7 @@ EOF
     
     # Wait for the rolling update to complete.
     echo "Waiting for rolling update to complete..."
-    kubectl wait --for=condition=available --timeout=300s deployment/kueue-controller-manager -n "${KUEUE_NAMESPACE}"
+    kubectl wait --for=condition=available --timeout=300s deployment/"${KUEUE_DEPLOYMENT_NAME}" -n "${KUEUE_NAMESPACE}"
     echo "Upgrade complete (rolling update finished)"
     echo "========================================="
 }

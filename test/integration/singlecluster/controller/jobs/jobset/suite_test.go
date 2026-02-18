@@ -27,7 +27,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	config "sigs.k8s.io/kueue/apis/config/v1beta2"
-	qcache "sigs.k8s.io/kueue/pkg/cache/queue"
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
 	"sigs.k8s.io/kueue/pkg/constants"
 	"sigs.k8s.io/kueue/pkg/controller/core"
@@ -37,6 +36,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/controller/tas"
 	tasindexer "sigs.k8s.io/kueue/pkg/controller/tas/indexer"
 	"sigs.k8s.io/kueue/pkg/scheduler"
+	preemptexpectations "sigs.k8s.io/kueue/pkg/scheduler/preemption/expectations"
 	"sigs.k8s.io/kueue/pkg/webhooks"
 	"sigs.k8s.io/kueue/test/integration/framework"
 	"sigs.k8s.io/kueue/test/util"
@@ -94,12 +94,12 @@ func managerAndSchedulerSetup(setupTASControllers bool, opts ...jobframework.Opt
 		managerSetup(opts...)(ctx, mgr)
 
 		cCache := schdcache.New(mgr.GetClient())
-		queues := qcache.NewManager(mgr.GetClient(), cCache)
+		queues := util.NewManagerForIntegrationTests(ctx, mgr.GetClient(), cCache)
 
 		configuration := &config.Configuration{}
 		mgr.GetScheme().Default(configuration)
 
-		failedCtrl, err := core.SetupControllers(mgr, queues, cCache, configuration, nil)
+		failedCtrl, err := core.SetupControllers(mgr, queues, cCache, configuration, nil, preemptexpectations.New(), nil)
 		gomega.Expect(err).ToNot(gomega.HaveOccurred(), "controller", failedCtrl)
 
 		err = indexer.Setup(ctx, mgr.GetFieldIndexer())
@@ -113,7 +113,7 @@ func managerAndSchedulerSetup(setupTASControllers bool, opts ...jobframework.Opt
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		}
 
-		sched := scheduler.New(queues, cCache, mgr.GetClient(), mgr.GetEventRecorderFor(constants.AdmissionName))
+		sched := scheduler.New(queues, cCache, mgr.GetClient(), mgr.GetEventRecorderFor(constants.AdmissionName), scheduler.WithPreemptionExpectations(preemptexpectations.New()))
 		err = sched.Start(ctx)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	}

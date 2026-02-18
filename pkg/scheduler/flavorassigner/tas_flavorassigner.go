@@ -19,14 +19,17 @@ package flavorassigner
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
+	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/resources"
 	"sigs.k8s.io/kueue/pkg/util/tas"
 	"sigs.k8s.io/kueue/pkg/workload"
@@ -49,7 +52,22 @@ func (a *Assignment) WorkloadsTopologyRequests(wl *workload.Info, cq *schdcache.
 				continue
 			}
 			isTASImplied := isTASImplied(&podSet, cq)
-			psTASRequest, err := podSetTopologyRequest(psAssignment, wl, cq, isTASImplied, i)
+
+			// Only unconstrained topology is supported with elastic workload slices.
+			var previousAssignment *kueue.TopologyAssignment
+			if features.Enabled(features.ElasticJobsViaWorkloadSlicesWithTAS) {
+				if podSet.TopologyRequest != nil && podSet.TopologyRequest.Required != nil {
+					psAssignment.error(errors.New("required topology is not supported with ElasticJobsViaWorkloadSlices"))
+					continue
+				}
+				if podSet.TopologyRequest != nil && podSet.TopologyRequest.Preferred != nil {
+					psAssignment.error(errors.New("preferred topology is not supported with ElasticJobsViaWorkloadSlices"))
+					continue
+				}
+				previousAssignment = getPreviousTopologyAssignment(a.replaceWorkloadSlice, podSet.Name)
+			}
+
+			psTASRequest, err := podSetTopologyRequest(psAssignment, wl, cq, isTASImplied, i, previousAssignment)
 			if err != nil {
 				psAssignment.error(err)
 			} else if psTASRequest != nil {
@@ -70,12 +88,13 @@ func podSetTopologyRequest(psAssignment *PodSetAssignment,
 	wl *workload.Info,
 	cq *schdcache.ClusterQueueSnapshot,
 	isTASImplied bool,
-	podSetIndex int) (*schdcache.TASPodSetRequests, error) {
+	podSetIndex int,
+	previousAssignment *kueue.TopologyAssignment) (*schdcache.TASPodSetRequests, error) {
 	if len(cq.TASFlavors) == 0 {
 		return nil, errors.New("workload requires Topology, but there is no TAS cache information")
 	}
 	podCount := psAssignment.Count
-	tasFlvr, err := onlyFlavor(psAssignment.Flavors)
+	tasFlvr, err := onlyTASFlavor(psAssignment.Flavors, cq.TASFlavors)
 	if err != nil {
 		return nil, err
 	}
@@ -84,9 +103,6 @@ func podSetTopologyRequest(psAssignment *PodSetAssignment,
 		// For ProvisioningRequest, delay TAS on first scheduling pass only (topology assigned after provisioning).
 		psAssignment.DelayedTopologyRequest = ptr.To(kueue.DelayedTopologyRequestStatePending)
 		return nil, nil
-	}
-	if cq.TASFlavors[*tasFlvr] == nil {
-		return nil, errors.New("workload requires Topology, but there is no TAS cache information for the assigned flavor")
 	}
 	podSet := &wl.Obj.Spec.PodSets[podSetIndex]
 	// Use PodSpec directly for TAS placement, not quota-filtered admission values.
@@ -107,24 +123,31 @@ func podSetTopologyRequest(psAssignment *PodSetAssignment,
 	}
 
 	return &schdcache.TASPodSetRequests{
-		Count:             podCount,
-		SinglePodRequests: singlePodRequests,
-		PodSet:            podSet,
-		PodSetUpdates:     podSetUpdates,
-		Flavor:            *tasFlvr,
-		Implied:           isTASImplied,
-		PodSetGroupName:   podSetGroupName,
+		Count:              podCount,
+		SinglePodRequests:  singlePodRequests,
+		PodSet:             podSet,
+		PodSetUpdates:      podSetUpdates,
+		Flavor:             *tasFlvr,
+		Implied:            isTASImplied,
+		PodSetGroupName:    podSetGroupName,
+		PreviousAssignment: previousAssignment,
 	}, nil
 }
 
-func onlyFlavor(ra ResourceAssignment) (*kueue.ResourceFlavorReference, error) {
-	if len(ra) == 0 {
-		return nil, errors.New("no flavor assigned")
+func onlyTASFlavor(
+	resourceAssignment ResourceAssignment,
+	tasFlavors map[kueue.ResourceFlavorReference]*schdcache.TASFlavorSnapshot,
+) (*kueue.ResourceFlavorReference, error) {
+	flavors := sets.New[kueue.ResourceFlavorReference]()
+
+	for _, flavorAssignment := range resourceAssignment {
+		if tasFlavors[flavorAssignment.Name] != nil {
+			flavors.Insert(flavorAssignment.Name)
+		}
 	}
 
-	flavors := sets.New[kueue.ResourceFlavorReference]()
-	for _, v := range ra {
-		flavors.Insert(v.Name)
+	if flavors.Len() == 0 {
+		return nil, errors.New("no TAS flavor assigned")
 	}
 
 	if flavors.Len() == 1 {
@@ -136,10 +159,10 @@ func onlyFlavor(ra ResourceAssignment) (*kueue.ResourceFlavorReference, error) {
 	for i, n := range list {
 		names[i] = string(n)
 	}
-	return nil, fmt.Errorf("more than one flavor assigned: %s", strings.Join(names, ", "))
+	return nil, fmt.Errorf("more than one TAS flavor assigned: %s", strings.Join(names, ", "))
 }
 
-func checkPodSetAndFlavorMatchForTAS(cq *schdcache.ClusterQueueSnapshot, ps *kueue.PodSet, flavor *kueue.ResourceFlavor) *string {
+func checkPodSetAndFlavorMatchForTAS(cq *schdcache.ClusterQueueSnapshot, ps *kueue.PodSet, flavor *kueue.ResourceFlavor, rg *schdcache.ResourceGroup) *string {
 	if isTASRequested(ps, cq) {
 		if isTASImplied(ps, cq) {
 			// If this is a TAS-only CQ, then we don't need to check the flavor because
@@ -149,6 +172,12 @@ func checkPodSetAndFlavorMatchForTAS(cq *schdcache.ClusterQueueSnapshot, ps *kue
 		}
 		// PodSet explicitly requires TAS, so we need to check if the flavor supports it.
 		if flavor.Spec.TopologyName == nil {
+			if !hasOverlapWithPodRequestedResources(ps, rg.CoveredResources) {
+				// We only accept the flavor if it does not have any intersection with
+				// the resources which are going to be provided by the TAS flavor.
+				// This flavor may still provide quota-only resources using ResourceTransformations.
+				return nil
+			}
 			return ptr.To(fmt.Sprintf("Flavor %q does not support TopologyAwareScheduling", flavor.Name))
 		}
 		s := cq.TASFlavors[kueue.ResourceFlavorReference(flavor.Name)]
@@ -173,6 +202,12 @@ func checkPodSetAndFlavorMatchForTAS(cq *schdcache.ClusterQueueSnapshot, ps *kue
 	return nil
 }
 
+// hasOverlapWithPodRequestedResources checks if the PodSet's resource requests overlap with the specified flavor resources.
+func hasOverlapWithPodRequestedResources(ps *kueue.PodSet, flavorResources sets.Set[corev1.ResourceName]) bool {
+	requests := resources.NewRequestsFromPodSpec(&ps.Template.Spec)
+	return flavorResources.HasAny(slices.Collect(maps.Keys(requests))...)
+}
+
 // isTASImplied returns true if TAS is requested implicitly.
 func isTASImplied(ps *kueue.PodSet, cq *schdcache.ClusterQueueSnapshot) bool {
 	return !workload.IsExplicitlyRequestingTAS(*ps) && cq.IsTASOnly()
@@ -182,4 +217,17 @@ func isTASImplied(ps *kueue.PodSet, cq *schdcache.ClusterQueueSnapshot) bool {
 // explicitly or implicitly.
 func isTASRequested(ps *kueue.PodSet, cq *schdcache.ClusterQueueSnapshot) bool {
 	return workload.IsExplicitlyRequestingTAS(*ps) || isTASImplied(ps, cq)
+}
+
+// getPreviousTopologyAssignment extracts the topology assignment from a replaced workload slice.
+func getPreviousTopologyAssignment(replaceWorkloadSlice *workload.Info, podSetName kueue.PodSetReference) *kueue.TopologyAssignment {
+	if replaceWorkloadSlice == nil || replaceWorkloadSlice.Obj.Status.Admission == nil {
+		return nil
+	}
+	for _, psa := range replaceWorkloadSlice.Obj.Status.Admission.PodSetAssignments {
+		if psa.Name == podSetName && psa.TopologyAssignment != nil {
+			return psa.TopologyAssignment
+		}
+	}
+	return nil
 }

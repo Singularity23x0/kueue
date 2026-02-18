@@ -63,7 +63,11 @@ spec:
                     cpu: "1"
 ```
 
-### c. Limitations
+### c. Suspend control
+
+Kueue controls the `spec.suspend` field of the RayJob. When a RayJob is admitted by Kueue, Kueue will unsuspend it by setting `spec.suspend` to `false`, regardless of its previous value.
+
+### d. Limitations
 
 - A Kueue managed RayJob cannot use an existing RayCluster.
 - The RayCluster should be deleted at the end of the job execution, `spec.ShutdownAfterJobFinishes` should be `true`.
@@ -125,4 +129,20 @@ spec:
 
 ### Example RayJob with Autoscaling
 
+In this example, the code is provided to the Ray framework via a ConfigMap.
+
+{{< include "examples/jobs/ray-job-autoscaling-code-sample.yaml" "yaml" >}}
+
+The RayJob looks like the following:
+
 {{< include "examples/jobs/ray-job-autoscaling-sample.yaml" "yaml" >}}
+
+You can run this RayJob with the following commands:
+
+```sh
+# Create the code ConfigMap (once)
+kubectl apply -f ray-job-autoscaling-code-sample.yaml
+# Create a RayJob. You can run this command multiple times
+# to observe the queueing and admission of the jobs.
+kubectl create -f ray-job-autoscaling-sample.yaml
+```

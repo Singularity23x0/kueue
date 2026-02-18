@@ -11,6 +11,24 @@
     lockToDefault: false
     preRelease: Beta
     version: "0.15"
+- name: AdmissionGatedBy
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "0.17"
+- name: AssignQueueLabelsForPods
+  versionedSpecs:
+  - default: true
+    lockToDefault: false
+    preRelease: Beta
+    version: "0.17"
+- name: CustomMetricLabels
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "0.17"
 - name: DynamicResourceAllocation
   versionedSpecs:
   - default: false
@@ -23,12 +41,30 @@
     lockToDefault: false
     preRelease: Alpha
     version: "0.13"
+- name: ElasticJobsViaWorkloadSlicesWithTAS
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "0.17"
 - name: FailureRecoveryPolicy
   versionedSpecs:
   - default: false
     lockToDefault: false
     preRelease: Alpha
     version: "0.15"
+- name: FairSharingPreemptWithinNominal
+  versionedSpecs:
+  - default: true
+    lockToDefault: false
+    preRelease: Beta
+    version: "0.17"
+- name: FairSharingPrioritizeNonBorrowing
+  versionedSpecs:
+  - default: true
+    lockToDefault: false
+    preRelease: Beta
+    version: "0.17"
 - name: FlavorFungibility
   versionedSpecs:
   - default: true
@@ -41,6 +77,10 @@
     lockToDefault: false
     preRelease: Beta
     version: "0.11"
+  - default: true
+    lockToDefault: true
+    preRelease: GA
+    version: "0.17"
 - name: LendingLimit
   versionedSpecs:
   - default: false
@@ -51,6 +91,10 @@
     lockToDefault: false
     preRelease: Beta
     version: "0.9"
+  - default: true
+    lockToDefault: true
+    preRelease: GA
+    version: "0.17"
 - name: LocalQueueDefaulting
   versionedSpecs:
   - default: false
@@ -61,6 +105,10 @@
     lockToDefault: false
     preRelease: Beta
     version: "0.12"
+  - default: true
+    lockToDefault: true
+    preRelease: GA
+    version: "0.17"
 - name: LocalQueueMetrics
   versionedSpecs:
   - default: false
@@ -103,6 +151,10 @@
     lockToDefault: false
     preRelease: Alpha
     version: "0.15"
+  - default: false
+    lockToDefault: false
+    preRelease: Deprecated
+    version: "0.17"
 - name: MultiKueueBatchJobWithManagedBy
   versionedSpecs:
   - default: false
@@ -123,6 +175,12 @@
     lockToDefault: false
     preRelease: Alpha
     version: "0.15"
+- name: MultiKueueOrchestratedPreemption
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "0.17"
 - name: MultiKueueRedoAdmissionOnEvictionInWorker
   versionedSpecs:
   - default: true
@@ -145,6 +203,10 @@
     lockToDefault: false
     preRelease: Beta
     version: "0.13"
+  - default: true
+    lockToDefault: true
+    preRelease: GA
+    version: "0.17"
 - name: PartialAdmission
   versionedSpecs:
   - default: false
@@ -155,6 +217,12 @@
     lockToDefault: false
     preRelease: Beta
     version: "0.5"
+- name: PriorityBoost
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "0.17"
 - name: PrioritySortingWithinCohort
   versionedSpecs:
   - default: true
@@ -168,7 +236,7 @@
     preRelease: Beta
     version: "0.15"
   - default: true
-    lockToDefault: false
+    lockToDefault: true
     preRelease: GA
     version: "0.17"
 - name: ReclaimablePods
@@ -189,12 +257,40 @@
     lockToDefault: false
     preRelease: Beta
     version: "0.13"
+  - default: true
+    lockToDefault: true
+    preRelease: GA
+    version: "0.17"
+- name: SchedulerLongRequeueInterval
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "0.17"
+- name: SchedulerTimestampPreemptionBuffer
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "0.17"
+- name: SchedulingEquivalenceHashing
+  versionedSpecs:
+  - default: true
+    lockToDefault: false
+    preRelease: Beta
+    version: "0.17"
 - name: SkipFinalizersForPodsSuspendedByParent
   versionedSpecs:
   - default: true
     lockToDefault: false
     preRelease: Beta
     version: "0.16"
+- name: SparkApplicationIntegration
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "0.17"
 - name: TASBalancedPlacement
   versionedSpecs:
   - default: false
@@ -221,16 +317,12 @@
     lockToDefault: false
     preRelease: Beta
     version: "0.14"
-- name: TASProfileLeastFreeCapacity
+- name: TASMultiLayerTopology
   versionedSpecs:
   - default: false
     lockToDefault: false
     preRelease: Alpha
-    version: "0.10"
-  - default: false
-    lockToDefault: false
-    preRelease: Deprecated
-    version: "0.11"
+    version: "0.17"
 - name: TASProfileMixed
   versionedSpecs:
   - default: false
@@ -241,6 +333,12 @@
     lockToDefault: false
     preRelease: Beta
     version: "0.15"
+- name: TASReplaceNodeOnNodeTaints
+  versionedSpecs:
+  - default: true
+    lockToDefault: false
+    preRelease: Beta
+    version: "0.17"
 - name: TASReplaceNodeOnPodTermination
   versionedSpecs:
   - default: false

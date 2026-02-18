@@ -6,6 +6,30 @@ date: 2024-10-09
 
 This page serves as a reference for all labels and annotations in Kueue.
 
+### kueue.x-k8s.io/cluster-queue-name
+
+Type: Label
+
+Example: `kueue.x-k8s.io/cluster-queue-name: "my-cluster-queue"`
+
+Used on: Pods.
+
+This label requires `AssignQueueLabelsForPods` feature that is enabled by default.
+
+The label key in all pods created by Kueue's workloads or managed by Kueue.
+It indicates which cluster queue admitted the Kueue's workload
+that the pod is corresponding to.
+It can be used, for example to aggregate the actual resource usage (cpu/mem)
+coming from workloads admitted to a given cluster queue.
+
+{{% alert title="Warning" color="warning" %}}
+
+This label is added only if cluster queue name is a valid label value.
+For limitations see Kubernetes [documentation](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#syntax-and-character-set)
+
+{{% /alert %}}
+
+
 ### kueue.x-k8s.io/is-group-workload
 
 Type: Annotation
@@ -36,6 +60,29 @@ Used on: [batch/Job](/docs/tasks/run/jobs/).
 
 The annotation key indicates the minimum `parallelism` acceptable for the job in the case of partial admission.
 
+### kueue.x-k8s.io/job-owner-gvk
+
+Type: Annotation
+
+Example: `kueue.x-k8s.io/job-owner-gvk: "leaderworkerset.x-k8s.io/v1, Kind=LeaderWorkerSet"`
+
+Used on: [Workload](/docs/concepts/workload/).
+
+The annotation holds the GVK (GroupVersionKind) of the owner job. Used for MultiKueue adapter
+lookup in workloads with multiple owner references (e.g., LeaderWorkerSet). This is an annotation
+rather than a label because the GVK string format contains characters invalid in label values.
+
+### kueue.x-k8s.io/job-owner-name
+
+Type: Annotation
+
+Example: `kueue.x-k8s.io/job-owner-name: "my-leaderworkerset"`
+
+Used on: [Workload](/docs/concepts/workload/).
+
+The annotation holds the name of the owner job. Used when the owner reference has been removed
+by Kubernetes garbage collection but the job name is still needed for MultiKueue operations.
+
 ### kueue.x-k8s.io/job-uid
 
 Type: Label
@@ -45,6 +92,23 @@ Example: `kueue.x-k8s.io/job-uid: "46ef6b23-a7d9-42b1-b0f8-071bbb29a94d"`
 Used on: [Workload](/docs/concepts/workload/).
 
 The label key in the workload resource holds the UID of the owner job.
+
+### kueue.x-k8s.io/local-queue-name
+
+Type: Label
+
+Example: `kueue.x-k8s.io/local-queue-name: "my-local-queue"`
+
+Used on: Pods.
+
+This label requires `AssignQueueLabelsForPods` feature that is enabled by default.
+
+The label key in all pods created by queue workloads or managed by Kueue.
+It indicates to which local queue a workload corresponding to the pod has been assigned.
+In case of managed pods equal to name of the local queue to which the pod has been assigned.
+
+It can be used, for example to aggregate the actual resource usage (cpu/mem)
+coming from workloads assigned to a given local queue.
 
 ### kueue.x-k8s.io/managed
 
@@ -75,6 +139,18 @@ Example: `kueue.x-k8s.io/multikueue-origin: "true"`
 Used on: [MultiKueue](/docs/concepts/multikueue/).
 
 The label key is used to track the creator of MultiKueue remote objects in Worker Cluster.
+
+### kueue.x-k8s.io/multikueue-origin-uid
+
+Type: Annotation
+
+Example: `kueue.x-k8s.io/multikueue-origin-uid: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"`
+
+Used on: [MultiKueue](/docs/concepts/multikueue/).
+
+The annotation stores the UID of the original object from the management cluster on remote objects
+in worker clusters. Used by job types (e.g., LeaderWorkerSet) that generate workload names based on
+their UID, ensuring workload names match between management and worker clusters.
 
 ### kueue.x-k8s.io/pod-group-fast-admission
 
@@ -144,7 +220,7 @@ Example: `kueue.x-k8s.io/podset: "main"`
 
 Used on: Kueue-managed Jobs.
 
-The label key is used on the Job's PodTemplate to indicate the name 
+The label key is used on the Job's PodTemplate to indicate the name
 of the PodSet of the admitted Workload corresponding to the PodTemplate.
 The label is set when starting the Job, and removed on stopping the Job.
 
@@ -157,6 +233,21 @@ Example: `kueue.x-k8s.io/pod-suspending-parent: "deployment"`
 Used on: [Plain Pods](/docs/tasks/run/plain_pods/).
 
 The annotation key is used to indicate the integration name of the Pod owner.
+
+### kueue.x-k8s.io/priority-boost
+
+Type: Annotation
+
+Example: `kueue.x-k8s.io/priority-boost: "10"`
+
+Used on: [Workload](/docs/concepts/workload/).
+
+可选的有符号整数注解，用于调整工作负载的有效优先级：
+`effectivePriority = workloadPriority + priorityBoost`。
+正值提高优先级，负值降低优先级。
+有效优先级同时用于调度排序和抢占候选排序。
+此注解由外部控制器直接设置在 Workload 上（不从 Job 传播）。
+如果值缺失或非法，会按 `0` 处理。
 
 
 ### kueue.x-k8s.io/prebuilt-workload-name
@@ -171,7 +262,7 @@ The label key of the job holds the name of the pre-built workload to be used.
 The intended use of prebuilt workload is to create the Job once the workload
 is created. In other scenarios the behavior is undefined.
 
-Note: When using `kueue.x-k8s.io/pod-group-name`, the prebuilt workload name 
+Note: When using `kueue.x-k8s.io/pod-group-name`, the prebuilt workload name
 and the pod group name should be the same.
 
 ### kueue.x-k8s.io/priority-class
@@ -219,3 +310,15 @@ Example: `kueue.x-k8s.io/role-hash: "b54683bb"`
 Used on: [Plain Pods](/docs/tasks/run/plain_pods/).
 
 The annotation key is used as the name for a Workload podSet.
+
+### kueue.x-k8s.io/component-workload-index
+
+Type: Annotation
+
+Example: `kueue.x-k8s.io/component-workload-index: "0"`
+
+Used on: [Workload](/docs/concepts/workload/).
+
+The annotation stores the numeric index for component workloads created by multi-workload jobs
+(e.g., LeaderWorkerSet creates one workload per replica). Used by MultiKueue to determine
+primary workload ordering when dispatching component workloads to worker clusters atomically.

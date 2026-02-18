@@ -33,6 +33,8 @@ controllerManager:
       # This should be set to 'IfNotPresent' for released version
       pullPolicy: Always
     podAnnotations: {}
+    # -- Zap log level. Higher values increase verbosity.
+    logLevel: 2
     # -- ControllerManager's pod resources
     resources:
       limits:
@@ -143,6 +145,7 @@ managerConfig:
       - "batch/job"
       - "kubeflow.org/mpijob"
       - "ray.io/rayjob"
+      - "ray.io/rayservice"
       - "ray.io/raycluster"
       - "jobset.x-k8s.io/jobset"
       - "trainer.kubeflow.org/trainjob"
@@ -152,6 +155,7 @@ managerConfig:
       - "kubeflow.org/xgboostjob"
       - "kubeflow.org/jaxjob"
       - "workload.codeflare.dev/appwrapper"
+    #  - "sparkoperator.k8s.io/sparkapplication"
       - "pod"
       - "deployment"
       - "statefulset"
@@ -229,6 +233,18 @@ kueueViz:
       requests:
         cpu: 500m
         memory: 512Mi
+    # -- KueueViz backend pod securityContext
+    podSecurityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    # -- KueueViz backend container securityContext
+    containerSecurityContext:
+      readOnlyRootFilesystem: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
     # -- Environment variables for KueueViz backend deployment
     env:
       - name: KUEUEVIZ_ALLOWED_ORIGINS
@@ -246,6 +262,17 @@ kueueViz:
       host: "backend.kueueviz.local"
       # -- KueueViz dashboard backend ingress tls secret name
       tlsSecretName: "kueueviz-backend-tls"
+    auth:
+      # -- Authentication mode: "Disabled" or "TokenReview" (Alpha, disabled by default)
+      mode: "Disabled"
+      # -- TokenReview-specific configuration (only used when mode is "TokenReview")
+      tokenReviewConfig:
+        # -- Optional comma-separated list of audiences for TokenReview
+        audiences: ""
+        # -- TTL for successful authentication cache
+        cacheTTL: "60s"
+        # -- TTL for failed authentication cache (prevents API server abuse)
+        negativeCacheTTL: "5s"
     image:
       # -- KueueViz dashboard backend image repository
       repository: "us-central1-docker.pkg.dev/k8s-staging-images/kueue/kueueviz-backend"
@@ -272,6 +299,10 @@ kueueViz:
       requests:
         cpu: 500m
         memory: 512Mi
+    # -- KueueViz frontend pod securityContext
+    podSecurityContext: {}
+    # -- KueueViz frontend container securityContext
+    containerSecurityContext: {}
     # -- Environment variables for KueueViz frontend deployment
     env:
       - name: REACT_APP_WEBSOCKET_URL

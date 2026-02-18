@@ -18,11 +18,11 @@ package statefulset
 
 import (
 	"context"
-	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
 	apivalidation "k8s.io/apimachinery/pkg/api/validation"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -31,10 +31,10 @@ import (
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	qcache "sigs.k8s.io/kueue/pkg/cache/queue"
-	"sigs.k8s.io/kueue/pkg/constants"
 	controllerconstants "sigs.k8s.io/kueue/pkg/controller/constants"
 	"sigs.k8s.io/kueue/pkg/controller/jobframework"
 	podconstants "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
+	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/util/roletracker"
 	"sigs.k8s.io/kueue/pkg/util/webhook"
 )
@@ -87,26 +87,10 @@ func (wh *Webhook) Default(ctx context.Context, stsObj *appsv1.StatefulSet) erro
 		return err
 	}
 	if suspend {
-		if ss.Spec.Template.Labels == nil {
-			ss.Spec.Template.Labels = make(map[string]string, 4)
-		}
-		ss.Spec.Template.Labels[constants.ManagedByKueueLabelKey] = constants.ManagedByKueueLabelValue
-		ss.Spec.Template.Labels[podconstants.GroupNameLabel] = GetWorkloadName(ss.Name)
-		if queueName := jobframework.QueueNameForObject(ss.Object()); queueName != "" {
-			ss.Spec.Template.Labels[controllerconstants.QueueLabel] = string(queueName)
-		}
-		if priorityClass := jobframework.WorkloadPriorityClassName(ss.Object()); priorityClass != "" {
-			ss.Spec.Template.Labels[controllerconstants.WorkloadPriorityClassLabel] = priorityClass
-		}
-
 		if ss.Spec.Template.Annotations == nil {
-			ss.Spec.Template.Annotations = make(map[string]string, 5)
+			ss.Spec.Template.Annotations = make(map[string]string, 1)
 		}
 		ss.Spec.Template.Annotations[podconstants.SuspendedByParentAnnotation] = FrameworkName
-		ss.Spec.Template.Annotations[podconstants.GroupTotalCountAnnotation] = fmt.Sprint(ptr.Deref(ss.Spec.Replicas, 1))
-		ss.Spec.Template.Annotations[podconstants.GroupFastAdmissionAnnotationKey] = podconstants.GroupFastAdmissionAnnotationValue
-		ss.Spec.Template.Annotations[podconstants.GroupServingAnnotationKey] = podconstants.GroupServingAnnotationValue
-		ss.Spec.Template.Annotations[kueue.PodGroupPodIndexLabelAnnotation] = appsv1.PodIndexLabel
 	}
 
 	return nil
@@ -129,6 +113,10 @@ func (wh *Webhook) ValidateCreate(ctx context.Context, stsObj *appsv1.StatefulSe
 	sts := fromObject(stsObj)
 
 	allErrs := jobframework.ValidateQueueName(sts.Object())
+
+	if features.Enabled(features.AdmissionGatedBy) {
+		allErrs = append(allErrs, webhook.ValidateAdmissionGatedByAnnotationOnCreate(sts.Object())...)
+	}
 
 	return nil, allErrs.ToAggregate()
 }
@@ -173,6 +161,10 @@ func (wh *Webhook) ValidateUpdate(ctx context.Context, oldSTSObj, newSTSObj *app
 		newStatefulSet.Object(),
 	)...)
 
+	if features.Enabled(features.AdmissionGatedBy) {
+		allErrs = append(allErrs, webhook.ValidateAdmissionGatedByAnnotationOnUpdate(oldStatefulSet.Object(), newStatefulSet.Object())...)
+	}
+
 	suspend, err := jobframework.WorkloadShouldBeSuspended(ctx, newStatefulSet.Object(), wh.client, wh.manageJobsWithoutQueueName, wh.managedJobsNamespaceSelector)
 	if err != nil {
 		return nil, err
@@ -203,10 +195,12 @@ func (wh *Webhook) ValidateUpdate(ctx context.Context, oldSTSObj, newSTSObj *app
 				allErrs = append(allErrs, field.Forbidden(replicasPath, "scaling down is still in progress"))
 			} else {
 				// Block if workload is still being deleted
-				workloadName := GetWorkloadName(oldStatefulSet.GetName())
-				wlKey := client.ObjectKey{Namespace: oldStatefulSet.GetNamespace(), Name: workloadName}
+				wlName, err := findWorkloadName(ctx, wh.client, oldSTSObj)
+				if err != nil {
+					return nil, err
+				}
 				var wl kueue.Workload
-				err := wh.client.Get(ctx, wlKey, &wl)
+				err = wh.client.Get(ctx, client.ObjectKey{Namespace: oldSTSObj.GetNamespace(), Name: wlName}, &wl)
 				if client.IgnoreNotFound(err) != nil {
 					return nil, err
 				} else if err == nil {
@@ -223,7 +217,6 @@ func (wh *Webhook) ValidateDelete(_ context.Context, _ *appsv1.StatefulSet) (war
 	return nil, nil
 }
 
-func GetWorkloadName(statefulSetName string) string {
-	// Passing empty UID as it is not available before object creation
-	return jobframework.GetWorkloadNameForOwnerWithGVK(statefulSetName, "", gvk)
+func GetWorkloadName(uid types.UID, statefulSetName string) string {
+	return jobframework.GetWorkloadNameForOwnerWithGVK(statefulSetName, uid, gvk)
 }

@@ -1,10 +1,50 @@
 ---
 title: "Labels and Annotations"
 linkTitle: "Labels and Annotations"
-date: 2024-10-09
+date: 2026-03-12
 ---
 
 This page serves as a reference for all labels and annotations in Kueue.
+
+### kueue.x-k8s.io/admission-gated-by
+
+Type: Annotation
+
+Example: `kueue.x-k8s.io/admission-gated-by: "example.com/mygate,example.com/mygate2"`
+
+Used on: Kueue-managed Jobs.
+
+This annotation requires the `AdmissionGatedBy` feature that is disabled by default.
+
+When it contains a value, the annotation prevents the Job from entering the Quota Reservation
+phase of Kueue's Admission Flow.
+The annotation value is a comma-separated list of 1 or more gate names and can only be added during Job
+creation. After creation, the annotation may only be deleted or modified to remove 1 or more gates.
+
+### kueue.x-k8s.io/cluster-queue-name
+
+Type: Label
+
+Example: `kueue.x-k8s.io/cluster-queue-name: "my-cluster-queue"`
+
+Used on: Pods.
+
+This label requires `AssignQueueLabelsForPods` feature that is enabled by default.
+
+The label key in all pods created by Kueue's workloads or managed by Kueue.
+It indicates which cluster queue admitted the Kueue's workload
+that the pod is corresponding to.
+It can be used, for example to aggregate the actual resource usage (cpu/mem)
+coming from workloads admitted to a given cluster queue.
+
+{{% alert title="Warning" color="warning" %}}
+
+This label is added only if cluster queue name is a valid label value.
+For limitations see Kubernetes [documentation](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#syntax-and-character-set)
+
+{{% /alert %}}
+
+
 
 ### kueue.x-k8s.io/is-group-workload
 
@@ -68,6 +108,23 @@ Example: `kueue.x-k8s.io/job-uid: "46ef6b23-a7d9-42b1-b0f8-071bbb29a94d"`
 Used on: [Workload](/docs/concepts/workload/).
 
 The label key in the workload resource holds the UID of the owner job.
+
+### kueue.x-k8s.io/local-queue-name
+
+Type: Label
+
+Example: `kueue.x-k8s.io/local-queue-name: "my-local-queue"`
+
+Used on: Pods.
+
+This label requires `AssignQueueLabelsForPods` feature that is enabled by default.
+
+The label key in all pods created by queue workloads or managed by Kueue.
+It indicates to which local queue a workload corresponding to the pod has been assigned.
+In case of managed pods equal to name of the local queue to which the pod has been assigned.
+
+It can be used, for example to aggregate the actual resource usage (cpu/mem)
+coming from workloads assigned to a given local queue.
 
 ### kueue.x-k8s.io/managed
 
@@ -195,7 +252,7 @@ Example: `kueue.x-k8s.io/podset: "main"`
 
 Used on: Kueue-managed Jobs.
 
-The label key is used on the Job's PodTemplate to indicate the name 
+The label key is used on the Job's PodTemplate to indicate the name
 of the PodSet of the admitted Workload corresponding to the PodTemplate.
 The label is set when starting the Job, and removed on stopping the Job.
 
@@ -209,7 +266,6 @@ Used on: [Plain Pods](/docs/tasks/run/plain_pods/).
 
 The annotation key is used to indicate the integration name of the Pod owner.
 
-
 ### kueue.x-k8s.io/prebuilt-workload-name
 
 Type: Label
@@ -222,8 +278,24 @@ The label key of the job holds the name of the pre-built workload to be used.
 The intended use of prebuilt workload is to create the Job once the workload
 is created. In other scenarios the behavior is undefined.
 
-Note: When using `kueue.x-k8s.io/pod-group-name`, the prebuilt workload name 
+Note: When using `kueue.x-k8s.io/pod-group-name`, the prebuilt workload name
 and the pod group name should be the same.
+
+### kueue.x-k8s.io/priority-boost
+
+Type: Annotation
+
+Example: `kueue.x-k8s.io/priority-boost: "10"`
+
+Used on: [Workload](/docs/concepts/workload/).
+
+An optional signed integer that adjusts a workload's effective priority:
+`effectivePriority = workloadPriority + priorityBoost`.
+Positive values increase priority; negative values decrease it.
+The effective priority is used for both scheduling order and preemption candidate ordering.
+This annotation is intended to be set directly on Workloads by external controllers (not propagated from Jobs).
+If the value is missing or empty, it is treated as `0`.
+If the value is invalid, Workload create or update is **rejected** by the admission webhook.
 
 ### kueue.x-k8s.io/priority-class
 

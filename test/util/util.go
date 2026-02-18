@@ -32,6 +32,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	kfmpi "github.com/kubeflow/mpi-operator/pkg/apis/kubeflow/v2beta1"
+	sparkv1beta2 "github.com/kubeflow/spark-operator/v2/api/v1beta2"
 	kftrainerapi "github.com/kubeflow/trainer/v2/pkg/apis/trainer/v1alpha1"
 	kftraining "github.com/kubeflow/training-operator/pkg/apis/kubeflow.org/v1"
 	"github.com/onsi/ginkgo/v2"
@@ -47,6 +48,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -64,6 +66,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 	leaderworkersetv1 "sigs.k8s.io/lws/api/leaderworkerset/v1"
+	"sigs.k8s.io/yaml"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/controller/jobs/leaderworkerset"
@@ -80,6 +83,19 @@ import (
 func init() {
 	// Use large MaxLength to make sure the diff contains relevant output
 	format.MaxLength = 500000
+	format.RegisterCustomFormatter(formatK8sObject)
+}
+
+func formatK8sObject(value any) (string, bool) {
+	obj, ok := value.(client.Object)
+	if !ok {
+		return "", false
+	}
+	objYAML, err := yaml.Marshal(obj)
+	if err != nil {
+		return "", false
+	}
+	return string(objYAML), true
 }
 
 var SetupLogger = sync.OnceFunc(func() {
@@ -91,6 +107,17 @@ var SetupLoggerGetObservedLogs = sync.OnceValue(func() *observer.ObservedLogs {
 	ctrl.SetLogger(logger)
 	return observedLogs
 })
+
+func assertMsg[T client.Object](message string, objs ...T) func() string {
+	return func() string {
+		var output strings.Builder
+		fmt.Fprintln(&output, message)
+		for _, obj := range objs {
+			fmt.Fprintln(&output, format.Object(obj, 1))
+		}
+		return output.String()
+	}
+}
 
 type objAsPtr[T any] interface {
 	client.Object
@@ -107,7 +134,7 @@ func DeleteObject[PtrT objAsPtr[T], T any](ctx context.Context, c client.Client,
 }
 
 func ExpectObjectToBeDeleted[PtrT objAsPtr[T], T any](ctx context.Context, k8sClient client.Client, o PtrT, deleteNow bool) {
-	expectObjectToBeDeletedWithTimeout(ctx, k8sClient, o, deleteNow, LongTimeout)
+	expectObjectToBeDeletedWithTimeout(ctx, k8sClient, o, deleteNow, MediumTimeout)
 }
 
 func ExpectObjectToBeDeletedWithTimeout[PtrT objAsPtr[T], T any](ctx context.Context, k8sClient client.Client, o PtrT, deleteNow bool, timeout time.Duration) {
@@ -121,10 +148,10 @@ func expectObjectToBeDeletedWithTimeout[PtrT objAsPtr[T], T any](ctx context.Con
 	if deleteNow {
 		gomega.ExpectWithOffset(2, client.IgnoreNotFound(DeleteObject(ctx, k8sClient, o))).To(gomega.Succeed())
 	}
+	newObj := PtrT(new(T))
 	gomega.EventuallyWithOffset(2, func(g gomega.Gomega) {
-		newObj := PtrT(new(T))
 		g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(o), newObj)).Should(utiltesting.BeNotFoundError())
-	}, timeout, Interval).Should(gomega.Succeed())
+	}, timeout, Interval).Should(gomega.Succeed(), assertMsg("Object still exists", newObj))
 }
 
 // DeleteNamespace deletes all objects the tests typically create in the namespace.
@@ -219,6 +246,10 @@ func DeleteAllRayJobsInNamespace(ctx context.Context, c client.Client, ns *corev
 	return deleteAllObjectsInNamespace(ctx, c, ns, &rayv1.RayJob{})
 }
 
+func DeleteAllSparkApplicationsInNamespace(ctx context.Context, c client.Client, ns *corev1.Namespace) error {
+	return deleteAllObjectsInNamespace(ctx, c, ns, &sparkv1beta2.SparkApplication{})
+}
+
 func DeleteAllPodsInNamespace(ctx context.Context, c client.Client, ns *corev1.Namespace) error {
 	return deleteAllPodsInNamespace(ctx, c, ns, 2)
 }
@@ -244,7 +275,7 @@ func deleteAllPodsInNamespace(ctx context.Context, c client.Client, ns *corev1.N
 				g.Expect(client.IgnoreNotFound(c.Update(ctx, &p))).Should(gomega.Succeed(), "removing finalizer")
 			}
 		}
-	}, LongTimeout, Interval).Should(gomega.Succeed())
+	}, MediumTimeout, Interval).Should(gomega.Succeed())
 	return nil
 }
 
@@ -254,7 +285,7 @@ func ExpectAllPodsInNamespaceDeleted(ctx context.Context, c client.Client, ns *c
 	gomega.Eventually(func(g gomega.Gomega) {
 		g.Expect(c.List(ctx, &pods, client.InNamespace(ns.Name))).Should(gomega.Succeed())
 		g.Expect(pods.Items).Should(gomega.BeEmpty())
-	}, LongTimeout, Interval).Should(gomega.Succeed())
+	}, MediumTimeout, Interval).Should(gomega.Succeed())
 }
 
 func DeleteWorkloadsInNamespace(ctx context.Context, c client.Client, ns *corev1.Namespace) error {
@@ -273,7 +304,7 @@ func deleteWorkloadsInNamespace(ctx context.Context, c client.Client, ns *corev1
 				g.Expect(client.IgnoreNotFound(c.Update(ctx, &wl))).Should(gomega.Succeed())
 			}
 		}
-	}, LongTimeout, Interval).Should(gomega.Succeed())
+	}, MediumTimeout, Interval).Should(gomega.Succeed())
 	return nil
 }
 
@@ -327,17 +358,19 @@ func ExpectWorkloadsToHaveQuotaReservation(ctx context.Context, k8sClient client
 func ExpectWorkloadsToHaveQuotaReservationByKey(ctx context.Context, k8sClient client.Client, cqName string, wlKeys ...client.ObjectKey) {
 	ginkgo.GinkgoHelper()
 	wlKeys = uniqueKeys(wlKeys)
-	wl := &kueue.Workload{}
+	wlObjects := make([]*kueue.Workload, len(wlKeys))
 	gomega.Eventually(func(g gomega.Gomega) {
 		admitted := make([]client.ObjectKey, 0, len(wlKeys))
-		for _, wlKey := range wlKeys {
+		for i, wlKey := range wlKeys {
+			wl := &kueue.Workload{}
 			g.Expect(k8sClient.Get(ctx, wlKey, wl)).To(gomega.Succeed())
 			if workload.HasQuotaReservation(wl) && string(wl.Status.Admission.ClusterQueue) == cqName {
 				admitted = append(admitted, wlKey)
 			}
+			wlObjects[i] = wl
 		}
-		g.Expect(admitted).Should(gomega.Equal(wlKeys), "Unexpected workloads were admitted")
-	}, Timeout, Interval).Should(gomega.Succeed())
+		g.Expect(admitted).Should(gomega.Equal(wlKeys))
+	}, Timeout, Interval).Should(gomega.Succeed(), assertMsg("Unexpected workloads with QuotaReservation", wlObjects...))
 }
 
 func FilterEvictedWorkloads(ctx context.Context, k8sClient client.Client, wls ...*kueue.Workload) []*kueue.Workload {
@@ -449,7 +482,7 @@ func ExpectWorkloadToFinish(ctx context.Context, k8sClient client.Client, wlKey 
 		var wl kueue.Workload
 		g.Expect(k8sClient.Get(ctx, wlKey, &wl)).To(gomega.Succeed())
 		g.Expect(wl.Status.Conditions).To(utiltesting.HaveConditionStatusTrue(kueue.WorkloadFinished), "it's finished")
-	}, LongTimeout, Interval).Should(gomega.Succeed())
+	}, MediumTimeout, Interval).Should(gomega.Succeed())
 }
 
 func ExpectPodsReadyCondition(ctx context.Context, k8sClient client.Client, wlKey client.ObjectKey) {
@@ -457,7 +490,7 @@ func ExpectPodsReadyCondition(ctx context.Context, k8sClient client.Client, wlKe
 		var wl kueue.Workload
 		g.Expect(k8sClient.Get(ctx, wlKey, &wl)).To(gomega.Succeed())
 		g.Expect(wl.Status.Conditions).To(utiltesting.HaveConditionStatusTrue(kueue.WorkloadPodsReady), "pods are ready")
-	}, LongTimeout, Interval).Should(gomega.Succeed())
+	}, MediumTimeout, Interval).Should(gomega.Succeed())
 }
 
 func AwaitWorkloadEvictionByPodsReadyTimeout(ctx context.Context, k8sClient client.Client, wlKey client.ObjectKey, sleep time.Duration) {
@@ -565,6 +598,47 @@ func ExpectWorkloadToBeAdmittedAs(ctx context.Context, k8sClient client.Client, 
 		g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(wl), &updatedWorkload)).To(gomega.Succeed())
 		g.Expect(updatedWorkload.Status.Admission).Should(gomega.BeComparableTo(admission))
 	}, Timeout, Interval).Should(gomega.Succeed())
+}
+
+func mustAdmissionCheckState(g gomega.Gomega, updatedWl *kueue.Workload, admissionCheckName string, expectedState kueue.CheckState, expectedMessage string, podSetUpdates ...kueue.PodSetUpdate) {
+	ginkgo.GinkgoHelper()
+	check := admissioncheck.FindAdmissionCheck(updatedWl.Status.AdmissionChecks, kueue.AdmissionCheckReference(admissionCheckName))
+	g.Expect(check).NotTo(gomega.BeNil())
+	g.Expect(check.State).To(gomega.Equal(expectedState))
+	if expectedMessage != "" {
+		g.Expect(check.Message).To(gomega.Equal(expectedMessage))
+	}
+	if len(podSetUpdates) > 0 {
+		g.Expect(check.PodSetUpdates).To(gomega.BeComparableTo(podSetUpdates))
+	}
+}
+
+func ExpectAdmissionCheckStateWithMessage(ctx context.Context, c client.Client, wlKey client.ObjectKey, admissionCheckName string, expectedState kueue.CheckState, expectedMessage string, podSetUpdates ...kueue.PodSetUpdate) {
+	ginkgo.GinkgoHelper()
+	updatedWl := &kueue.Workload{}
+	gomega.Eventually(func(g gomega.Gomega) {
+		g.Expect(c.Get(ctx, wlKey, updatedWl)).To(gomega.Succeed())
+		mustAdmissionCheckState(g, updatedWl, admissionCheckName, expectedState, expectedMessage, podSetUpdates...)
+	}, MediumTimeout, Interval).Should(gomega.Succeed(), assertMsg("Message or state did not match for the admission check", updatedWl))
+}
+
+func ExpectAdmissionCheckState(ctx context.Context, c client.Client, wlKey client.ObjectKey, admissionCheckName string, expectedState kueue.CheckState, podSetUpdates ...kueue.PodSetUpdate) {
+	ginkgo.GinkgoHelper()
+	ExpectAdmissionCheckStateWithMessage(ctx, c, wlKey, admissionCheckName, expectedState, "", podSetUpdates...)
+}
+
+func ConsistentlyAdmissionCheckStateWithMessage(ctx context.Context, c client.Client, wlKey client.ObjectKey, admissionCheckName string, expectedState kueue.CheckState, expectedMessage string, podSetUpdates ...kueue.PodSetUpdate) {
+	ginkgo.GinkgoHelper()
+	updatedWl := &kueue.Workload{}
+	gomega.Consistently(func(g gomega.Gomega) {
+		g.Expect(c.Get(ctx, wlKey, updatedWl)).To(gomega.Succeed())
+		mustAdmissionCheckState(g, updatedWl, admissionCheckName, expectedState, expectedMessage, podSetUpdates...)
+	}, ConsistentDuration, ShortInterval).Should(gomega.Succeed(), assertMsg("Message or state did not match for the admission check", updatedWl))
+}
+
+func ConsistentlyAdmissionCheckState(ctx context.Context, c client.Client, wlKey client.ObjectKey, admissionCheckName string, expectedState kueue.CheckState, podSetUpdates ...kueue.PodSetUpdate) {
+	ginkgo.GinkgoHelper()
+	ConsistentlyAdmissionCheckStateWithMessage(ctx, c, wlKey, admissionCheckName, expectedState, "", podSetUpdates...)
 }
 
 func SetQuotaReservation(ctx context.Context, k8sClient client.Client, wlKey client.ObjectKey, admission *kueue.Admission) {
@@ -723,8 +797,8 @@ func ExpectPodsJustFinalized(ctx context.Context, k8sClient client.Client, keys 
 		createdPod := &corev1.Pod{}
 		gomega.EventuallyWithOffset(1, func(g gomega.Gomega) {
 			g.Expect(k8sClient.Get(ctx, key, createdPod)).To(gomega.Succeed())
-			g.Expect(createdPod.Finalizers).Should(gomega.BeEmpty(), "Expected pod to be finalized")
-		}, Timeout, Interval).Should(gomega.Succeed())
+			g.Expect(createdPod.Finalizers).To(gomega.BeEmpty())
+		}, Timeout, Interval).Should(gomega.Succeed(), assertMsg("Expected pod to be finalized", createdPod))
 	}
 }
 
@@ -738,8 +812,8 @@ func ExpectPodsFinalizedOrGone(ctx context.Context, k8sClient client.Client, key
 				return
 			}
 			g.Expect(err).To(gomega.Succeed())
-			g.Expect(createdPod.Finalizers).Should(gomega.BeEmpty(), "Expected pod to be finalized")
-		}, Timeout, Interval).Should(gomega.Succeed())
+			g.Expect(createdPod.Finalizers).To(gomega.BeEmpty())
+		}, Timeout, Interval).Should(gomega.Succeed(), assertMsg("Expected pod to be finalized", createdPod))
 	}
 }
 
@@ -753,8 +827,8 @@ func ExpectWorkloadsFinalizedOrGone(ctx context.Context, k8sClient client.Client
 				return
 			}
 			g.Expect(err).To(gomega.Succeed())
-			g.Expect(createdWorkload.Finalizers).Should(gomega.BeEmpty(), "Expected workload to be finalized")
-		}, Timeout, Interval).Should(gomega.Succeed())
+			g.Expect(createdWorkload.Finalizers).To(gomega.BeEmpty())
+		}, Timeout, Interval).Should(gomega.Succeed(), assertMsg("Expected workload to be finalized", createdWorkload))
 	}
 }
 
@@ -813,7 +887,7 @@ func ExpectClusterQueuesToBeActive(ctx context.Context, c client.Client, cqs ...
 			g.Expect(c.Get(ctx, client.ObjectKeyFromObject(cq), readCq)).To(gomega.Succeed())
 			g.Expect(readCq.Status.Conditions).To(utiltesting.HaveConditionStatusTrue(kueue.ClusterQueueActive))
 		}
-	}, LongTimeout, Interval).Should(gomega.Succeed())
+	}, MediumTimeout, Interval).Should(gomega.Succeed())
 }
 
 func ExpectLocalQueuesToBeActive(ctx context.Context, c client.Client, lqs ...*kueue.LocalQueue) {
@@ -823,7 +897,7 @@ func ExpectLocalQueuesToBeActive(ctx context.Context, c client.Client, lqs ...*k
 			g.Expect(c.Get(ctx, client.ObjectKeyFromObject(lq), readLq)).To(gomega.Succeed())
 			g.Expect(readLq.Status.Conditions).To(utiltesting.HaveConditionStatusTrue(kueue.LocalQueueActive))
 		}
-	}, LongTimeout, Interval).Should(gomega.Succeed())
+	}, MediumTimeout, Interval).Should(gomega.Succeed())
 }
 
 func ExpectAdmissionChecksToBeActive(ctx context.Context, c client.Client, acs ...*kueue.AdmissionCheck) {
@@ -842,7 +916,7 @@ func ExpectJobUnsuspended(ctx context.Context, c client.Client, key types.Namesp
 	gomega.Eventually(func(g gomega.Gomega) {
 		g.Expect(c.Get(ctx, key, job)).To(gomega.Succeed())
 		g.Expect(job.Spec.Suspend).Should(gomega.Equal(ptr.To(false)))
-	}, LongTimeout, Interval).Should(gomega.Succeed())
+	}, MediumTimeout, Interval).Should(gomega.Succeed())
 }
 
 func ExpectJobUnsuspendedWithNodeSelectors(ctx context.Context, c client.Client, key types.NamespacedName, nodeSelector map[string]string) {
@@ -852,15 +926,7 @@ func ExpectJobUnsuspendedWithNodeSelectors(ctx context.Context, c client.Client,
 	gomega.Eventually(func(g gomega.Gomega) {
 		g.Expect(c.Get(ctx, key, job)).To(gomega.Succeed())
 		g.Expect(job.Spec.Template.Spec.NodeSelector).Should(gomega.Equal(nodeSelector))
-	}, LongTimeout, Interval).Should(gomega.Succeed())
-}
-
-func ExpectRayClusterUnsuspended(ctx context.Context, c client.Client, key types.NamespacedName) {
-	rayCluster := &rayv1.RayCluster{}
-	gomega.EventuallyWithOffset(1, func(g gomega.Gomega) {
-		g.Expect(c.Get(ctx, key, rayCluster)).To(gomega.Succeed())
-		g.Expect(rayCluster.Spec.Suspend).Should(gomega.Equal(ptr.To(false)))
-	}, Timeout, Interval).Should(gomega.Succeed())
+	}, MediumTimeout, Interval).Should(gomega.Succeed())
 }
 
 func CreateNodesWithStatus(ctx context.Context, c client.Client, nodes []corev1.Node) {
@@ -995,6 +1061,13 @@ func MustCreate(ctx context.Context, c client.Client, obj client.Object) {
 	gomega.Expect(c.Create(ctx, obj)).Should(gomega.Succeed())
 }
 
+func MustCreateWithRetry(ctx context.Context, c client.Client, obj client.Object) {
+	ginkgo.GinkgoHelper()
+	gomega.Eventually(func(g gomega.Gomega) {
+		g.Expect(client.IgnoreAlreadyExists(c.Create(ctx, obj))).ToNot(gomega.HaveOccurred())
+	}, Timeout, Interval).Should(gomega.Succeed())
+}
+
 func CreateClusterQueuesAndWaitForActive(ctx context.Context, c client.Client, cqs ...*kueue.ClusterQueue) {
 	ginkgo.GinkgoHelper()
 	for _, cq := range cqs {
@@ -1112,6 +1185,9 @@ func ExpectWorkloadsInNamespace(ctx context.Context, k8sClient client.Client, na
 func ExpectNewWorkloadSlice(ctx context.Context, k8sClient client.Client, oldWorkload *kueue.Workload) (newWorkload *kueue.Workload) {
 	ginkgo.GinkgoHelper()
 	gomega.Eventually(func(g gomega.Gomega) {
+		// Reset newWorkload each iteration to ensure the returned value is from
+		// the current poll, not a stale pointer from a previous retry attempt.
+		newWorkload = nil
 		wlList := &kueue.WorkloadList{}
 		g.Expect(k8sClient.List(ctx, wlList, client.InNamespace(oldWorkload.Namespace))).To(gomega.Succeed())
 		for i := range wlList.Items {
@@ -1121,6 +1197,8 @@ func ExpectNewWorkloadSlice(ctx context.Context, k8sClient client.Client, oldWor
 				break
 			}
 		}
+		g.Expect(newWorkload).ShouldNot(gomega.BeNil(),
+			"replacement workload for %s not found", workload.Key(oldWorkload))
 	}, Timeout, Interval).Should(gomega.Succeed())
 	return newWorkload
 }
@@ -1132,7 +1210,7 @@ func ExpectJobToBeRunning(ctx context.Context, c client.Client, job *batchv1.Job
 		g.Expect(c.Get(ctx, client.ObjectKeyFromObject(job), createdJob)).To(gomega.Succeed())
 		g.Expect(createdJob.Status.StartTime).NotTo(gomega.BeNil())
 		g.Expect(createdJob.Status.CompletionTime).To(gomega.BeNil())
-	}, LongTimeout, Interval).Should(gomega.Succeed())
+	}, MediumTimeout, Interval).Should(gomega.Succeed())
 }
 
 func ExpectJobToBeCompleted(ctx context.Context, c client.Client, job *batchv1.Job) {
@@ -1146,7 +1224,7 @@ func ExpectJobToBeCompleted(ctx context.Context, c client.Client, job *batchv1.J
 				Status: corev1.ConditionTrue,
 			},
 			cmpopts.IgnoreFields(batchv1.JobCondition{}, "LastTransitionTime", "LastProbeTime", "Reason", "Message"))))
-	}, LongTimeout, Interval).Should(gomega.Succeed())
+	}, MediumTimeout, Interval).Should(gomega.Succeed())
 }
 
 func UpdateReclaimablePods(ctx context.Context, c client.Client, wl *kueue.Workload, reclaimablePods []kueue.ReclaimablePod) {
@@ -1194,4 +1272,78 @@ func IsLoggedEntryAConcurrentModification(le observer.LoggedEntry) bool {
 	errorDetals := le.ContextMap()["error"].(string)
 	expectedConcurrentModiciationDetails := "the object has been modified; please apply your changes to the latest version and try again"
 	return strings.Contains(errorDetals, expectedConcurrentModiciationDetails)
+}
+
+// BreakConnection breaks connection to the cluster, then returns:
+// a callback to restore the connection AND
+// the timestamp of becoming disconnected
+func BreakConnection(ctx context.Context, cli client.Client, cluster *kueue.MultiKueueCluster) (restoreConnection func(), disconnectedTime time.Time) {
+	ginkgo.GinkgoHelper()
+
+	var trueLocation string
+	clusterKey := client.ObjectKeyFromObject(cluster)
+
+	ginkgo.By(fmt.Sprintf("breaking the connection to %s", clusterKey), func() {
+		gomega.Eventually(func(g gomega.Gomega) {
+			createdCluster := &kueue.MultiKueueCluster{}
+			g.Expect(cli.Get(ctx, clusterKey, createdCluster)).To(gomega.Succeed())
+			trueLocation = createdCluster.Spec.ClusterSource.KubeConfig.Location
+			createdCluster.Spec.ClusterSource.KubeConfig.Location = "bad-secret"
+			g.Expect(cli.Update(ctx, createdCluster)).To(gomega.Succeed())
+		}, Timeout, Interval).Should(gomega.Succeed())
+
+		gomega.Eventually(func(g gomega.Gomega) {
+			createdCluster := &kueue.MultiKueueCluster{}
+			g.Expect(cli.Get(ctx, clusterKey, createdCluster)).To(gomega.Succeed())
+			activeCondition := apimeta.FindStatusCondition(createdCluster.Status.Conditions, kueue.MultiKueueClusterActive)
+			g.Expect(activeCondition).To(gomega.BeComparableTo(&metav1.Condition{
+				Type:   kueue.MultiKueueClusterActive,
+				Status: metav1.ConditionFalse,
+				Reason: "BadKubeConfig",
+			}, IgnoreConditionMessage, IgnoreConditionTimestampsAndObservedGeneration))
+			disconnectedTime = activeCondition.LastTransitionTime.Time
+		}, Timeout, Interval).Should(gomega.Succeed())
+	})
+
+	return createConnectionRestoringCallback(ctx, cli, cluster, trueLocation), disconnectedTime
+}
+
+func createConnectionRestoringCallback(ctx context.Context, cli client.Client, cluster *kueue.MultiKueueCluster, location string) func() {
+	return func() {
+		ginkgo.GinkgoHelper()
+
+		clusterKey := client.ObjectKeyFromObject(cluster)
+
+		ginkgo.By(fmt.Sprintf("restoring the connection to %s", clusterKey), func() {
+			gomega.Eventually(func(g gomega.Gomega) {
+				createdCluster := &kueue.MultiKueueCluster{}
+				g.Expect(cli.Get(ctx, clusterKey, createdCluster)).To(gomega.Succeed())
+				createdCluster.Spec.ClusterSource.KubeConfig.Location = location
+				g.Expect(cli.Update(ctx, createdCluster)).To(gomega.Succeed())
+			}, Timeout, Interval).Should(gomega.Succeed())
+
+			gomega.Eventually(func(g gomega.Gomega) {
+				createdCluster := &kueue.MultiKueueCluster{}
+				g.Expect(cli.Get(ctx, clusterKey, createdCluster)).To(gomega.Succeed())
+				activeCondition := apimeta.FindStatusCondition(createdCluster.Status.Conditions, kueue.MultiKueueClusterActive)
+				g.Expect(activeCondition).To(gomega.BeComparableTo(&metav1.Condition{
+					Type:   kueue.MultiKueueClusterActive,
+					Status: metav1.ConditionTrue,
+					Reason: "Active",
+				}, IgnoreConditionMessage, IgnoreConditionTimestampsAndObservedGeneration))
+			}, Timeout, Interval).Should(gomega.Succeed())
+		})
+	}
+}
+
+func ResourceQtyToFloat64(quantityStr string) float64 {
+	q := resource.MustParse(quantityStr)
+	return q.AsApproximateFloat64()
+}
+
+func IgnoreConflict(err error) error {
+	if apierrors.IsConflict(err) {
+		return nil
+	}
+	return err
 }

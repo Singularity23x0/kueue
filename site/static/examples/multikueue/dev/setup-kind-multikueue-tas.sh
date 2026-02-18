@@ -18,10 +18,12 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-KUEUE_VERSION="${KUEUE_VERSION:-v0.15.0}"
+DEFAULT_KUEUE_VERSION=v0.16.1
+KUEUE_VERSION="${KUEUE_VERSION:-${DEFAULT_KUEUE_VERSION}}"
 USE_MAIN_BRANCH="${USE_MAIN_BRANCH:-false}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKER_CLUSTERS="worker1 worker2"
+SERVICE_ACCOUNT="multikueue-sa"
 
 # Parse command line flags
 while [[ $# -gt 0 ]]; do
@@ -38,7 +40,7 @@ while [[ $# -gt 0 ]]; do
             echo "Unknown option: $1"
             echo "Usage: $0 [--main] [--version VERSION]"
             echo "  --main           Use main branch instead of released version"
-            echo "  --version        Specify Kueue version (default: v0.15.0)"
+            echo "  --version        Specify Kueue version (default: ${DEFAULT_KUEUE_VERSION})"
             exit 1
             ;;
     esac
@@ -71,21 +73,16 @@ kubectl config use-context kind-manager
 # Install Kueue
 if [ "$USE_MAIN_BRANCH" = "true" ]; then
     echo "[2/5] Installing Kueue from main branch..."
-    KUEUE_APPLY_FLAGS="-k github.com/kubernetes-sigs/kueue/config/default?ref=main"
+    KUEUE_APPLY_FLAGS=(-k "github.com/kubernetes-sigs/kueue/config/default?ref=main")
 else
     echo "[2/5] Installing Kueue ${KUEUE_VERSION}..."
-    KUEUE_APPLY_FLAGS="-f https://github.com/kubernetes-sigs/kueue/releases/download/${KUEUE_VERSION}/manifests.yaml"
+    KUEUE_APPLY_FLAGS=(-f "https://github.com/kubernetes-sigs/kueue/releases/download/${KUEUE_VERSION}/manifests.yaml")
 fi
 
 for cluster in manager ${WORKER_CLUSTERS}; do
-    # shellcheck disable=SC2086
-    kubectl --context "kind-${cluster}" apply --server-side ${KUEUE_APPLY_FLAGS}
+    kubectl --context "kind-${cluster}" apply --server-side "${KUEUE_APPLY_FLAGS[@]}"
     kubectl --context "kind-${cluster}" wait --for=condition=available --timeout=300s deployment/kueue-controller-manager -n kueue-system
 done
-
-# Configure manager for Kind clusters
-kubectl --context kind-manager patch deployment kueue-controller-manager -n kueue-system --type='json' \
-  -p='[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--feature-gates=MultiKueueAllowInsecureKubeconfigs=true"}]'
 
 cat > /tmp/kueue-integrations-patch.yaml <<'EOF'
 data:
@@ -131,7 +128,7 @@ done
 echo "[4/5] Creating worker kubeconfigs..."
 for cluster in ${WORKER_CLUSTERS}; do
     # Create ServiceAccount
-    kubectl --context "kind-${cluster}" create sa multikueue-sa -n kueue-system 2>/dev/null || true
+    kubectl --context "kind-${cluster}" create sa ${SERVICE_ACCOUNT} -n kueue-system 2>/dev/null || true
 
     # Create ClusterRole for Jobs
     kubectl --context "kind-${cluster}" create clusterrole multikueue-role \
@@ -145,14 +142,28 @@ for cluster in ${WORKER_CLUSTERS}; do
     # Create ClusterRoleBindings
     kubectl --context "kind-${cluster}" create clusterrolebinding multikueue-crb \
       --clusterrole=multikueue-role \
-      --serviceaccount=kueue-system:multikueue-sa 2>/dev/null || true
+      --serviceaccount=kueue-system:${SERVICE_ACCOUNT} 2>/dev/null || true
 
     kubectl --context "kind-${cluster}" create clusterrolebinding multikueue-crb-status \
       --clusterrole=multikueue-role-status \
-      --serviceaccount=kueue-system:multikueue-sa 2>/dev/null || true
+      --serviceaccount=kueue-system:${SERVICE_ACCOUNT} 2>/dev/null || true
+    
+    # Create a secret bound to the new service account
+    kubectl --context "kind-${cluster}" apply -f - <<EOF 
+apiVersion: v1
+kind: Secret
+metadata:
+  name: multikueue-sa-token
+  namespace: kueue-system
+  annotations:
+    kubernetes.io/service-account.name: "${SERVICE_ACCOUNT}"
+type: kubernetes.io/service-account-token
+EOF
+    # Extract token from secret
+    TOKEN=$(kubectl --context "kind-${cluster}" get secret multikueue-sa-token -n kueue-system -o jsonpath='{.data.token}' | base64 --decode)
 
-    # Create token
-    TOKEN=$(kubectl --context "kind-${cluster}" create token multikueue-sa -n kueue-system --duration=24h)
+    # Extract the Certificate Authority
+    CA_DATA=$(kubectl --context "kind-${cluster}" config view --minify --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}')
 
     # Create kubeconfig with insecure-skip-tls-verify for Kind clusters
     cat > "${SCRIPT_DIR}/${cluster}.kubeconfig" <<EOF
@@ -160,17 +171,17 @@ apiVersion: v1
 kind: Config
 clusters:
 - cluster:
-    insecure-skip-tls-verify: true
+    certificate-authority-data: ${CA_DATA}
     server: https://${cluster}-control-plane:6443
   name: ${cluster}
 contexts:
 - context:
     cluster: ${cluster}
-    user: multikueue-sa
+    user: ${SERVICE_ACCOUNT}
   name: ${cluster}
 current-context: ${cluster}
 users:
-- name: multikueue-sa
+- name: ${SERVICE_ACCOUNT}
   user:
     token: ${TOKEN}
 EOF

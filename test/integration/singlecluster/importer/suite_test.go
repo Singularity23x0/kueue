@@ -27,7 +27,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	config "sigs.k8s.io/kueue/apis/config/v1beta2"
-	qcache "sigs.k8s.io/kueue/pkg/cache/queue"
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
 	"sigs.k8s.io/kueue/pkg/constants"
 	"sigs.k8s.io/kueue/pkg/controller/core"
@@ -35,8 +34,10 @@ import (
 	workloadjob "sigs.k8s.io/kueue/pkg/controller/jobs/job"
 	"sigs.k8s.io/kueue/pkg/controller/jobs/pod"
 	"sigs.k8s.io/kueue/pkg/scheduler"
+	preemptexpectations "sigs.k8s.io/kueue/pkg/scheduler/preemption/expectations"
 	"sigs.k8s.io/kueue/pkg/webhooks"
 	"sigs.k8s.io/kueue/test/integration/framework"
+	"sigs.k8s.io/kueue/test/util"
 )
 
 var (
@@ -69,12 +70,13 @@ func managerAndSchedulerSetup(ctx context.Context, mgr manager.Manager) {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	cCache := schdcache.New(mgr.GetClient())
-	queues := qcache.NewManager(mgr.GetClient(), cCache)
+	queues := util.NewManagerForIntegrationTests(ctx, mgr.GetClient(), cCache)
 
 	configuration := &config.Configuration{}
 	mgr.GetScheme().Default(configuration)
 
-	failedCtrl, err := core.SetupControllers(mgr, queues, cCache, configuration, nil)
+	preemptionExpectations := preemptexpectations.New()
+	failedCtrl, err := core.SetupControllers(mgr, queues, cCache, configuration, nil, preemptionExpectations, nil)
 	gomega.Expect(err).ToNot(gomega.HaveOccurred(), "controller", failedCtrl)
 
 	failedWebhook, err := webhooks.Setup(mgr, nil)
@@ -95,7 +97,7 @@ func managerAndSchedulerSetup(ctx context.Context, mgr manager.Manager) {
 	err = podReconciler.SetupWithManager(mgr)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-	sched := scheduler.New(queues, cCache, mgr.GetClient(), mgr.GetEventRecorderFor(constants.AdmissionName))
+	sched := scheduler.New(queues, cCache, mgr.GetClient(), mgr.GetEventRecorderFor(constants.AdmissionName), scheduler.WithPreemptionExpectations(preemptionExpectations))
 	err = sched.Start(ctx)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }

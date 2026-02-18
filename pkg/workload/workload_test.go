@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	corev1 "k8s.io/api/core/v1"
@@ -43,7 +44,6 @@ import (
 	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/resources"
 	"sigs.k8s.io/kueue/pkg/util/admissioncheck"
-	qutil "sigs.k8s.io/kueue/pkg/util/queue"
 	utiltas "sigs.k8s.io/kueue/pkg/util/tas"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
@@ -506,7 +506,7 @@ func TestNewInfo(t *testing.T) {
 				features.SetFeatureGateDuringTest(t, fg, enabled)
 			}
 			info := NewInfo(&tc.workload, tc.infoOptions...)
-			if diff := cmp.Diff(info, &tc.wantInfo, cmpopts.IgnoreFields(Info{}, "Obj")); diff != "" {
+			if diff := cmp.Diff(info, &tc.wantInfo, cmpopts.IgnoreFields(Info{}, "Obj", "SchedulingHash")); diff != "" {
 				t.Errorf("NewInfo(_) = (-want,+got):\n%s", diff)
 			}
 		})
@@ -1075,7 +1075,7 @@ func TestFlavorResourceUsage(t *testing.T) {
 	}
 }
 
-func TestAdmissionCheckStrategy(t *testing.T) {
+func TestFilterChecksForAdmission(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	cases := map[string]struct {
 		cq                  *kueue.ClusterQueue
@@ -1140,7 +1140,7 @@ func TestAdmissionCheckStrategy(t *testing.T) {
 				Obj(),
 			wantAdmissionChecks: sets.New[kueue.AdmissionCheckReference]("ac1", "ac2"),
 		},
-		"AdmissionCheckStrategy with a non-existent flavor": {
+		"AdmissionCheckStrategy with only a non-existent flavor": {
 			wl: utiltestingapi.MakeWorkload("wl", "ns").
 				ReserveQuotaAt(utiltestingapi.MakeAdmission("cq").
 					PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
@@ -1155,22 +1155,98 @@ func TestAdmissionCheckStrategy(t *testing.T) {
 				Obj(),
 			wantAdmissionChecks: sets.New[kueue.AdmissionCheckReference](),
 		},
-		"Workload has no QuotaReserved": {
+		"AdmissionCheckStrategy with an additional non-existent flavor": {
 			wl: utiltestingapi.MakeWorkload("wl", "ns").
+				ReserveQuotaAt(utiltestingapi.MakeAdmission("cq").
+					PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+						Assignment("cpu", "flavor1", "1").
+						Obj()).
+					Obj(), now).
+				Obj(),
+			cq: utiltestingapi.MakeClusterQueue("cq").
+				ResourceGroup(*utiltestingapi.MakeFlavorQuotas("flavor1").Obj()).
+				AdmissionCheckStrategy(
+					*utiltestingapi.MakeAdmissionCheckStrategyRule("ac1", "flavor1", "flavor-nonexistent").Obj()).
+				Obj(),
+			wantAdmissionChecks: sets.New[kueue.AdmissionCheckReference]("ac1"),
+		},
+		"Two AdmissionCheckStrategies, one covering one flavor, one covering another": {
+			wl: utiltestingapi.MakeWorkload("wl", "ns").
+				ReserveQuotaAt(utiltestingapi.MakeAdmission("cq").
+					PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+						Assignment("cpu", "flavor1", "1").
+						Assignment("memory", "flavor2", "1").
+						Obj()).
+					Obj(), now).
 				Obj(),
 			cq: utiltestingapi.MakeClusterQueue("cq").
 				ResourceGroup(*utiltestingapi.MakeFlavorQuotas("flavor1").Obj(), *utiltestingapi.MakeFlavorQuotas("flavor2").Obj()).
 				AdmissionCheckStrategy(
 					*utiltestingapi.MakeAdmissionCheckStrategyRule("ac1", "flavor1").Obj(),
-					*utiltestingapi.MakeAdmissionCheckStrategyRule("ac2").Obj()).
+					*utiltestingapi.MakeAdmissionCheckStrategyRule("ac2", "flavor2").Obj(),
+				).
 				Obj(),
-			wantAdmissionChecks: nil,
+			wantAdmissionChecks: sets.New[kueue.AdmissionCheckReference]("ac1", "ac2"),
 		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, log := utiltesting.ContextWithLog(t)
-			gotAdmissionChecks := AdmissionChecksForWorkload(log, tc.wl, admissioncheck.NewAdmissionChecks(tc.cq), qutil.AllFlavors(tc.cq.Spec.ResourceGroups))
+			gotAdmissionChecks := admissionChecksForAdmission(log, admissioncheck.NewAdmissionChecks(tc.cq), *tc.wl.Status.Admission)
+			if diff := cmp.Diff(tc.wantAdmissionChecks, gotAdmissionChecks); diff != "" {
+				t.Errorf("Unexpected AdmissionChecks, (want-/got+):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestAdmissionChecksForWorkload(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	cases := map[string]struct {
+		wl                  *kueue.Workload
+		wantAdmissionChecks sets.Set[kueue.AdmissionCheckReference]
+	}{
+		"Only relevant checks returned for an admitted workload": {
+			wl: utiltestingapi.MakeWorkload("wl", "ns").
+				ReserveQuotaAt(utiltestingapi.MakeAdmission("cq").
+					PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+						Assignment("cpu", "flavor1", "1").
+						Assignment("memory", "flavor2", "1").
+						Obj()).
+					Obj(), now).
+				Obj(),
+			wantAdmissionChecks: sets.New[kueue.AdmissionCheckReference]("ac1", "ac2", "ac3", "ac4", "ac6"),
+		},
+		"Only correct checks covering all relevant flavors returned for Workload without Quota Reserved ": {
+			wl: utiltestingapi.MakeWorkload("wl", "ns").
+				Obj(),
+			wantAdmissionChecks: sets.New[kueue.AdmissionCheckReference]("ac3", "ac4", "ac6"),
+		},
+		"All checks returned when workload has an empty assignment": {
+			wl: utiltestingapi.MakeWorkload("wl", "ns").
+				ReserveQuotaAt(
+					utiltestingapi.MakeAdmission("cq").
+						PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).Obj()).
+						Obj(),
+					now,
+				).Obj(),
+			wantAdmissionChecks: sets.New[kueue.AdmissionCheckReference]("ac1", "ac2", "ac3", "ac4", "ac5", "ac6"),
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, log := utiltesting.ContextWithLog(t)
+			cq := utiltestingapi.MakeClusterQueue("cq").
+				ResourceGroup(*utiltestingapi.MakeFlavorQuotas("flavor1").Obj(), *utiltestingapi.MakeFlavorQuotas("flavor2").Obj()).
+				AdmissionCheckStrategy(
+					*utiltestingapi.MakeAdmissionCheckStrategyRule("ac1", "flavor1").Obj(),
+					*utiltestingapi.MakeAdmissionCheckStrategyRule("ac2", "flavor2").Obj(),
+					*utiltestingapi.MakeAdmissionCheckStrategyRule("ac3", "flavor1", "flavor2").Obj(),
+					*utiltestingapi.MakeAdmissionCheckStrategyRule("ac4", "flavor1", "flavor2", "non-existent-flavor").Obj(),
+					*utiltestingapi.MakeAdmissionCheckStrategyRule("ac5", "non-existent-flavor").Obj(),
+					*utiltestingapi.MakeAdmissionCheckStrategyRule("ac6").Obj(),
+				).Obj()
+			gotAdmissionChecks := AdmissionChecksForWorkload(log, tc.wl, cq)
 
 			if diff := cmp.Diff(tc.wantAdmissionChecks, gotAdmissionChecks); diff != "" {
 				t.Errorf("Unexpected AdmissionChecks, (want-/got+):\n%s", diff)
@@ -2428,7 +2504,8 @@ func TestWorkloadPriorityClassChanged(t *testing.T) {
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			gotChanged := PriorityChanged(tc.oldWorkload, tc.newWorkload)
+			_, log := utiltesting.ContextWithLog(t)
+			gotChanged := PriorityChanged(log, tc.oldWorkload, tc.newWorkload)
 			if gotChanged != tc.wantChanged {
 				t.Errorf("workloadPriorityChanged() = %v, want %v", gotChanged, tc.wantChanged)
 			}
@@ -2523,7 +2600,7 @@ func TestFinish(t *testing.T) {
 
 			fakeClock := testingclock.NewFakeClock(now)
 
-			gotErr := Finish(ctx, cl, tc.args.wl, tc.args.reason, tc.args.message, fakeClock, nil)
+			gotErr := Finish(ctx, cl, tc.args.wl, tc.args.reason, tc.args.message, fakeClock)
 			if diff := cmp.Diff(tc.want.err, gotErr, cmpopts.EquateErrors()); diff != "" {
 				t.Errorf("Unexpected error (-want,+got):\n%s", diff)
 			}
@@ -2563,6 +2640,91 @@ func TestGetLocalQueueFromWorkload(t *testing.T) {
 			gotLq := GetLocalQueue(tc.wl)
 			if gotLq != tc.wantLq {
 				t.Errorf("invalid local queue identified: got \"%v\", want \"%v\"", gotLq, tc.wantLq)
+			}
+		})
+	}
+}
+
+func TestSchedulingHash(t *testing.T) {
+	cases := map[string]struct {
+		wl1          *kueue.Workload
+		wl2          *kueue.Workload
+		wantSame     bool
+		featureGates map[featuregate.Feature]bool
+	}{
+		"same spec different identity produces same hash": {
+			wl1: utiltestingapi.MakeWorkload("wl1", "ns1").
+				Request(corev1.ResourceCPU, "2").
+				Request(corev1.ResourceMemory, "1Gi").Obj(),
+			wl2: utiltestingapi.MakeWorkload("wl2", "ns2").
+				Request(corev1.ResourceCPU, "2").
+				Request(corev1.ResourceMemory, "1Gi").Obj(),
+			wantSame:     true,
+			featureGates: map[featuregate.Feature]bool{features.SchedulingEquivalenceHashing: true},
+		},
+		"different resource requests": {
+			wl1: utiltestingapi.MakeWorkload("wl1", "ns").
+				Request(corev1.ResourceCPU, "1").Obj(),
+			wl2: utiltestingapi.MakeWorkload("wl2", "ns").
+				Request(corev1.ResourceCPU, "2").Obj(),
+			wantSame:     false,
+			featureGates: map[featuregate.Feature]bool{features.SchedulingEquivalenceHashing: true},
+		},
+		"different pod counts": {
+			wl1: utiltestingapi.MakeWorkload("wl1", "ns").
+				PodSets(*utiltestingapi.MakePodSet(kueue.DefaultPodSetName, 3).
+					Request(corev1.ResourceCPU, "1").Obj()).Obj(),
+			wl2: utiltestingapi.MakeWorkload("wl2", "ns").
+				PodSets(*utiltestingapi.MakePodSet(kueue.DefaultPodSetName, 5).
+					Request(corev1.ResourceCPU, "1").Obj()).Obj(),
+			wantSame:     false,
+			featureGates: map[featuregate.Feature]bool{features.SchedulingEquivalenceHashing: true},
+		},
+		"different workload priorities": {
+			wl1: utiltestingapi.MakeWorkload("wl1", "ns").
+				Priority(100).
+				Request(corev1.ResourceCPU, "1").Obj(),
+			wl2: utiltestingapi.MakeWorkload("wl2", "ns").
+				Priority(200).
+				Request(corev1.ResourceCPU, "1").Obj(),
+			wantSame:     false,
+			featureGates: map[featuregate.Feature]bool{features.SchedulingEquivalenceHashing: true},
+		},
+		"same raw priority but different effective priority": {
+			wl1: func() *kueue.Workload {
+				wl := utiltestingapi.MakeWorkload("wl1", "ns").
+					Priority(100).
+					Request(corev1.ResourceCPU, "1").Obj()
+				wl.Annotations = map[string]string{"kueue.x-k8s.io/priority-boost": "10"}
+				return wl
+			}(),
+			wl2: utiltestingapi.MakeWorkload("wl2", "ns").
+				Priority(100).
+				Request(corev1.ResourceCPU, "1").Obj(),
+			wantSame: false,
+			featureGates: map[featuregate.Feature]bool{
+				features.SchedulingEquivalenceHashing: true,
+				features.PriorityBoost:                true,
+			},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			for fg, enable := range tc.featureGates {
+				features.SetFeatureGateDuringTest(t, fg, enable)
+			}
+			info1 := NewInfo(tc.wl1)
+			info1.UpdateSchedulingHash(logr.Discard())
+			info2 := NewInfo(tc.wl2)
+			info2.UpdateSchedulingHash(logr.Discard())
+			if info1.SchedulingHash == "" {
+				t.Error("SchedulingHash should not be empty")
+			}
+			if tc.wantSame && info1.SchedulingHash != info2.SchedulingHash {
+				t.Errorf("expected same hash, got %q and %q", info1.SchedulingHash, info2.SchedulingHash)
+			}
+			if !tc.wantSame && info1.SchedulingHash == info2.SchedulingHash {
+				t.Errorf("expected different hashes, got same %q", info1.SchedulingHash)
 			}
 		})
 	}

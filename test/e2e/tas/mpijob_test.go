@@ -128,7 +128,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling for MPIJob", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.List(ctx, pods, client.InNamespace(ns.Name))).To(gomega.Succeed())
 					g.Expect(pods.Items).Should(gomega.HaveLen(numPods))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			ginkgo.By("ensure all pods are scheduled", func() {
@@ -138,7 +138,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling for MPIJob", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.List(ctx, pods, client.InNamespace(ns.Name), listOpts)).To(gomega.Succeed())
 					g.Expect(pods.Items).Should(gomega.HaveLen(numPods))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			ginkgo.By("verify the assignment of pods are as expected with rank-based ordering", func() {
@@ -213,7 +213,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling for MPIJob", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.List(ctx, pods, client.InNamespace(ns.Name))).To(gomega.Succeed())
 					g.Expect(pods.Items).Should(gomega.HaveLen(numPods))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			ginkgo.By("ensure all pods are scheduled", func() {
@@ -223,7 +223,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling for MPIJob", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.List(ctx, pods, client.InNamespace(ns.Name), listOpts)).To(gomega.Succeed())
 					g.Expect(pods.Items).Should(gomega.HaveLen(numPods))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			ginkgo.By("verify the assignment of all pods (launcher + workers) with rank-based ordering", func() {
@@ -292,7 +292,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling for MPIJob", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.List(ctx, pods, client.InNamespace(ns.Name))).To(gomega.Succeed())
 					g.Expect(pods.Items).Should(gomega.HaveLen(numPods))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			ginkgo.By("ensure all pods are scheduled", func() {
@@ -302,22 +302,20 @@ var _ = ginkgo.Describe("TopologyAwareScheduling for MPIJob", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.List(ctx, pods, client.InNamespace(ns.Name), listOpts)).To(gomega.Succeed())
 					g.Expect(pods.Items).Should(gomega.HaveLen(numPods))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
-			// TODO: Once we resolve this bug https://github.com/kubernetes-sigs/kueue/issues/3400,
-			// we can verify the following Pods node assignments.
-			// ginkgo.By("verify the assignment of all pods (launcher + workers) with rank-based ordering within the same block", func() {
-			//	 gomega.Expect(k8sClient.List(ctx, pods, client.InNamespace(ns.Name))).To(gomega.Succeed())
-			//	 gotAssignment := readRankAssignmentsFromMPIJobPods(pods.Items, true)
-			//	 wantAssignment := map[string]string{
-			//		 "launcher/0": "kind-worker",
-			//		 "worker/1":   "kind-worker2",
-			//		 "worker/2":   "kind-worker3",
-			//		 "worker/3":   "kind-worker4",
-			//	 }
-			//	 gomega.Expect(wantAssignment).Should(gomega.BeComparableTo(gotAssignment))
-			// })
+			ginkgo.By("verify the assignment of all pods (launcher + workers) with rank-based ordering within the same block", func() {
+				gomega.Expect(k8sClient.List(ctx, pods, client.InNamespace(ns.Name))).To(gomega.Succeed())
+				gotAssignment := readRankAssignmentsFromMPIJobPods(pods.Items, true)
+				wantAssignment := map[string]string{
+					"launcher/0": "kind-worker",
+					"worker/1":   "kind-worker",
+					"worker/2":   "kind-worker2",
+					"worker/3":   "kind-worker3",
+				}
+				gomega.Expect(wantAssignment).Should(gomega.BeComparableTo(gotAssignment))
+			})
 		})
 	})
 })

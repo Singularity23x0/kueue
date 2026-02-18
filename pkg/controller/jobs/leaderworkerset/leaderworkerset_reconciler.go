@@ -26,15 +26,20 @@ import (
 	"github.com/go-logr/logr"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	leaderworkersetv1 "sigs.k8s.io/lws/api/leaderworkerset/v1"
@@ -97,9 +102,9 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	ctrl.Log.V(3).Info("Setting up LeaderWorkerSet reconciler")
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&leaderworkersetv1.LeaderWorkerSet{}).
+		For(&leaderworkersetv1.LeaderWorkerSet{}, builder.WithPredicates(r)).
 		Named(controllerName).
-		WithEventFilter(r).
+		Watches(&kueue.Workload{}, &lwsWorkloadHandler{}).
 		WithOptions(controller.Options{
 			LogConstructor: roletracker.NewLogConstructor(r.roleTracker, controllerName),
 		}).
@@ -139,12 +144,23 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	eg.Go(func() error {
 		return parallelize.Until(ctx, len(toUpdate), func(i int) error {
+			if features.Enabled(features.AdmissionGatedBy) {
+				if err := jobframework.UpdateAdmissionGatedBy(ctx, r.client, r.record, lws, toUpdate[i]); err != nil {
+					return err
+				}
+			}
+
 			return jobframework.UpdateWorkloadPriority(ctx, r.client, r.record, lws, toUpdate[i], nil)
 		})
 	})
 
 	eg.Go(func() error {
 		return parallelize.Until(ctx, len(toDelete), func(i int) error {
+			// Remove the finalizer before deleting to ensure prompt cleanup,
+			// consistent with how the job framework reconciler deletes workloads.
+			if err := workload.RemoveFinalizer(ctx, r.client, toDelete[i]); err != nil && !apierrors.IsNotFound(err) {
+				return err
+			}
 			return r.client.Delete(ctx, toDelete[i])
 		})
 	})
@@ -177,7 +193,9 @@ func (r *Reconciler) filterWorkloads(lws *leaderworkersetv1.LeaderWorkerSet, exi
 		replicas = ptr.Deref(lws.Spec.Replicas, 1)
 	)
 
-	if lws.Status.Replicas > replicas {
+	// During normal scale-down, status.Replicas lags behind spec.Replicas,
+	// which prevents excess workloads from being moved to toDelete on time.
+	if lws.Status.Replicas > replicas && isRollingUpdateWithSurge(lws) {
 		replicas = lws.Status.Replicas
 	}
 
@@ -195,6 +213,14 @@ func (r *Reconciler) filterWorkloads(lws *leaderworkersetv1.LeaderWorkerSet, exi
 	}
 
 	return toCreate, toUpdate, slices.Collect(maps.Values(toDelete))
+}
+
+func isRollingUpdateWithSurge(lws *leaderworkersetv1.LeaderWorkerSet) bool {
+	if lws.Spec.RolloutStrategy.RollingUpdateConfiguration == nil {
+		return false
+	}
+	maxSurge := int32(lws.Spec.RolloutStrategy.RollingUpdateConfiguration.MaxSurge.IntValue())
+	return maxSurge > 0 && lws.Status.UpdatedReplicas < ptr.Deref(lws.Spec.Replicas, 1)
 }
 
 func (r *Reconciler) createPrebuiltWorkload(ctx context.Context, lws *leaderworkersetv1.LeaderWorkerSet, workloadName string, index int) error {
@@ -226,6 +252,11 @@ func (r *Reconciler) constructWorkload(lws *leaderworkersetv1.LeaderWorkerSet, w
 	}
 	createdWorkload := podcontroller.NewGroupWorkload(workloadName, lws, podSets, r.labelKeysToCopy)
 
+	if createdWorkload.Labels == nil {
+		createdWorkload.Labels = make(map[string]string, 1)
+	}
+	createdWorkload.Labels[constants.JobUIDLabel] = string(lws.UID)
+
 	// Add job owner annotations for reliable MultiKueue adapter lookup.
 	// These annotations persist even after Kubernetes GC removes owner references.
 	if createdWorkload.Annotations == nil {
@@ -234,6 +265,10 @@ func (r *Reconciler) constructWorkload(lws *leaderworkersetv1.LeaderWorkerSet, w
 	createdWorkload.Annotations[constants.JobOwnerGVKAnnotation] = gvk.String()
 	createdWorkload.Annotations[constants.JobOwnerNameAnnotation] = lws.Name
 	createdWorkload.Annotations[constants.ComponentWorkloadIndexAnnotation] = strconv.Itoa(index)
+
+	if features.Enabled(features.AdmissionGatedBy) {
+		jobframework.PropagateAdmissionGatedByAnnotation(lws, createdWorkload)
+	}
 
 	if err := controllerutil.SetOwnerReference(lws, createdWorkload, r.client.Scheme()); err != nil {
 		return nil, err
@@ -321,9 +356,8 @@ func (r *Reconciler) handle(obj client.Object) bool {
 		return false
 	}
 
-	ctx := context.Background()
 	log := r.logger().WithValues("leaderworkerset", klog.KObj(lws))
-	ctrl.LoggerInto(ctx, log)
+	ctx := ctrl.LoggerInto(context.Background(), log)
 
 	// Handle only leaderworkerset managed by kueue.
 	suspend, err := jobframework.WorkloadShouldBeSuspended(ctx, lws, r.client, r.manageJobsWithoutQueueName, r.managedJobsNamespaceSelector)
@@ -332,4 +366,48 @@ func (r *Reconciler) handle(obj client.Object) bool {
 	}
 
 	return suspend
+}
+
+// lwsWorkloadHandler watches for workload deletions and triggers reconciliation
+// of the owning LeaderWorkerSet. This ensures that during rolling updates, when
+// workloads are deleted, the LWS reconciler is triggered to recreate them.
+type lwsWorkloadHandler struct{}
+
+var _ handler.EventHandler = (*lwsWorkloadHandler)(nil)
+
+func (h *lwsWorkloadHandler) Create(ctx context.Context, e event.CreateEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	h.enqueue(ctx, e.Object, q)
+}
+
+func (h *lwsWorkloadHandler) Update(_ context.Context, _ event.UpdateEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+}
+
+func (h *lwsWorkloadHandler) Generic(_ context.Context, _ event.GenericEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+}
+
+func (h *lwsWorkloadHandler) Delete(ctx context.Context, e event.DeleteEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	h.enqueue(ctx, e.Object, q)
+}
+
+// enqueue is a helper function to add the owning LeaderWorkerSet to the reconcile queue.
+func (h *lwsWorkloadHandler) enqueue(ctx context.Context, obj client.Object, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	wl, ok := obj.(*kueue.Workload)
+	if !ok {
+		return
+	}
+
+	for _, ownerRef := range wl.OwnerReferences {
+		if ownerRef.APIVersion == gvk.GroupVersion().String() && ownerRef.Kind == gvk.Kind {
+			log := ctrl.LoggerFrom(ctx).WithValues("workload", klog.KObj(wl))
+			log.V(5).Info("Queueing reconcile for owning LeaderWorkerSet", "leaderworkerset", ownerRef.Name)
+
+			q.Add(reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Namespace: wl.Namespace,
+					Name:      ownerRef.Name,
+				},
+			})
+			return
+		}
+	}
 }

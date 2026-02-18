@@ -42,12 +42,14 @@ type fairSharingIterator struct {
 }
 
 func makeFairSharingIterator(ctx context.Context, entries []entry, workloadOrdering workload.Ordering) *fairSharingIterator {
+	log := ctrl.LoggerFrom(ctx)
 	f := fairSharingIterator{
 		cqToEntry: make(map[*schdcache.ClusterQueueSnapshot]*entry, len(entries)),
 		entryComparer: entryComparer{
+			log:              log,
 			workloadOrdering: workloadOrdering,
 		},
-		log: ctrl.LoggerFrom(ctx),
+		log: log,
 	}
 	for i := range entries {
 		f.cqToEntry[entries[i].clusterQueueSnapshot] = &entries[i]
@@ -159,29 +161,41 @@ type drsKey struct {
 }
 
 type entryComparer struct {
+	log              logr.Logger
 	drsValues        map[drsKey]schdcache.DRS
 	workloadOrdering workload.Ordering
 }
 
 func (e *entryComparer) less(a, b *entry, parentCohort kueue.CohortReference) bool {
+	// 1: Nominal first — a workload that fits within its CQ's nominal
+	// quota is always preferred over one that requires borrowing.
+	// This prevents heavy borrowing on one flavor from eroding a
+	// CQ's nominal entitlement on another flavor.
+	if features.Enabled(features.FairSharingPrioritizeNonBorrowing) {
+		aRequiresBorrowing := a.assignment.RequiresBorrowing()
+		bRequiresBorrowing := b.assignment.RequiresBorrowing()
+		if aRequiresBorrowing != bRequiresBorrowing {
+			return !aRequiresBorrowing
+		}
+	}
+
+	// 2: DRF
 	aDrs := e.drsValues[drsKey{parentCohort: parentCohort, workloadKey: workload.Key(a.Obj)}]
 	bDrs := e.drsValues[drsKey{parentCohort: parentCohort, workloadKey: workload.Key(b.Obj)}]
-
-	// 1: DRF
 	if cmp := schdcache.CompareDRS(aDrs, bDrs); cmp != 0 {
 		return cmp == -1
 	}
 
-	// 2: Priority
+	// 3: Effective priority
 	if features.Enabled(features.PrioritySortingWithinCohort) {
-		p1 := priority.Priority(a.Obj)
-		p2 := priority.Priority(b.Obj)
+		p1 := priority.EffectivePriority(e.log, a.Obj)
+		p2 := priority.EffectivePriority(e.log, b.Obj)
 		if p1 != p2 {
 			return p1 > p2
 		}
 	}
 
-	// 3: FIFO
+	// 4: FIFO
 	aComparisonTimestamp := e.workloadOrdering.GetQueueOrderTimestamp(a.Obj)
 	bComparisonTimestamp := e.workloadOrdering.GetQueueOrderTimestamp(b.Obj)
 	return aComparisonTimestamp.Before(bComparisonTimestamp)

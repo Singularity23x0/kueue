@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/controller/constants"
 	"sigs.k8s.io/kueue/pkg/features"
 	utilpod "sigs.k8s.io/kueue/pkg/util/pod"
+	"sigs.k8s.io/kueue/pkg/util/webhook"
 	"sigs.k8s.io/kueue/pkg/workloadslicing"
 )
 
@@ -69,6 +70,11 @@ func ValidateJobOnCreate(job GenericJob) field.ErrorList {
 	allErrs := ValidateQueueName(job.Object())
 	allErrs = append(allErrs, validateCreateForPrebuiltWorkload(job)...)
 	allErrs = append(allErrs, validateCreateForMaxExecTime(job)...)
+
+	if features.Enabled(features.AdmissionGatedBy) {
+		allErrs = append(allErrs, webhook.ValidateAdmissionGatedByAnnotationOnCreate(job.Object())...)
+	}
+
 	return allErrs
 }
 
@@ -79,6 +85,11 @@ func ValidateJobOnUpdate(oldJob, newJob GenericJob, defaultQueueExist func(strin
 	allErrs = append(allErrs, validateUpdateForMaxExecTime(oldJob, newJob)...)
 	allErrs = append(allErrs, validateJobUpdateForWorkloadPriorityClassName(oldJob, newJob)...)
 	allErrs = append(allErrs, validatedUpdateForEnabledWorkloadSlice(oldJob, newJob)...)
+
+	if features.Enabled(features.AdmissionGatedBy) {
+		allErrs = append(allErrs, webhook.ValidateAdmissionGatedByAnnotationOnUpdate(oldJob.Object(), newJob.Object())...)
+	}
+
 	return allErrs
 }
 
@@ -117,10 +128,8 @@ func validateUpdateForQueueName(oldJob, newJob GenericJob, defaultQueueExist fun
 	if !newJob.IsSuspended() {
 		allErrs = append(allErrs, apivalidation.ValidateImmutableField(QueueName(newJob), QueueName(oldJob), queueNameLabelPath)...)
 	}
-	if features.Enabled(features.LocalQueueDefaulting) {
-		if QueueName(newJob) == "" && QueueName(oldJob) != "" && defaultQueueExist(oldJob.Object().GetNamespace()) {
-			allErrs = append(allErrs, field.Invalid(queueNameLabelPath, "", "queue-name must not be empty in namespace with default queue"))
-		}
+	if QueueName(newJob) == "" && QueueName(oldJob) != "" && defaultQueueExist(oldJob.Object().GetNamespace()) {
+		allErrs = append(allErrs, field.Invalid(queueNameLabelPath, "", "queue-name must not be empty in namespace with default queue"))
 	}
 
 	return allErrs

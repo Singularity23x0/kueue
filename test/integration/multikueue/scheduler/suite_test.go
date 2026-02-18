@@ -33,7 +33,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	config "sigs.k8s.io/kueue/apis/config/v1beta2"
-	qcache "sigs.k8s.io/kueue/pkg/cache/queue"
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
 	"sigs.k8s.io/kueue/pkg/constants"
 	"sigs.k8s.io/kueue/pkg/controller/admissionchecks/multikueue"
@@ -43,6 +42,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/controller/jobframework"
 	workloadjob "sigs.k8s.io/kueue/pkg/controller/jobs/job"
 	"sigs.k8s.io/kueue/pkg/scheduler"
+	preemptexpectations "sigs.k8s.io/kueue/pkg/scheduler/preemption/expectations"
 	"sigs.k8s.io/kueue/pkg/util/kubeversion"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
 	"sigs.k8s.io/kueue/pkg/webhooks"
@@ -111,12 +111,13 @@ func managerSetup(ctx context.Context, mgr manager.Manager) {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	cCache := schdcache.New(mgr.GetClient())
-	queues := qcache.NewManager(mgr.GetClient(), cCache)
+	queues := util.NewManagerForIntegrationTests(ctx, mgr.GetClient(), cCache)
 
 	configuration := &config.Configuration{}
 	mgr.GetScheme().Default(configuration)
 
-	failedCtrl, err := core.SetupControllers(mgr, queues, cCache, configuration, nil)
+	preemptionExpectations := preemptexpectations.New()
+	failedCtrl, err := core.SetupControllers(mgr, queues, cCache, configuration, nil, preemptionExpectations, nil)
 	gomega.Expect(err).ToNot(gomega.HaveOccurred(), "controller", failedCtrl)
 
 	failedWebhook, err := webhooks.Setup(mgr, nil)
@@ -150,7 +151,7 @@ func managerSetup(ctx context.Context, mgr manager.Manager) {
 	err = reconciler.SetupWithManager(mgr)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-	sched := scheduler.New(queues, cCache, mgr.GetClient(), mgr.GetEventRecorderFor(constants.AdmissionName))
+	sched := scheduler.New(queues, cCache, mgr.GetClient(), mgr.GetEventRecorderFor(constants.AdmissionName), scheduler.WithPreemptionExpectations(preemptionExpectations))
 	err = sched.Start(ctx)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
@@ -185,26 +186,22 @@ var _ = ginkgo.BeforeSuite(func() {
 	ginkgo.By("creating the clusters", func() {
 		mu = sync.Mutex{}
 		wg := sync.WaitGroup{}
-		wg.Add(3)
-		go func() {
+		wg.Go(func() {
 			defer ginkgo.GinkgoRecover()
-			defer wg.Done()
 			// pass nil setup since the manager for the manage cluster is different in some specs.
 			c := createCluster(nil, managerFeatureGates...)
 			managerTestCluster = c
-		}()
-		go func() {
+		})
+		wg.Go(func() {
 			defer ginkgo.GinkgoRecover()
-			defer wg.Done()
 			c := createCluster(managerSetup)
 			worker1TestCluster = c
-		}()
-		go func() {
+		})
+		wg.Go(func() {
 			defer ginkgo.GinkgoRecover()
-			defer wg.Done()
 			c := createCluster(managerSetup)
 			worker2TestCluster = c
-		}()
+		})
 		wg.Wait()
 	})
 

@@ -35,10 +35,7 @@ import (
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
 	testingutil "sigs.k8s.io/kueue/pkg/util/testingjobs/mpijob"
-)
-
-const (
-	invalidRFC1123Message = `a lowercase RFC 1123 subdomain must consist of lower case alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character (e.g. 'example.com', regex used for validation is '[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*')`
+	testutil "sigs.k8s.io/kueue/test/util"
 )
 
 var (
@@ -61,7 +58,7 @@ func TestValidateCreate(t *testing.T) {
 		{
 			name:    "invalid queue-name label",
 			job:     testingutil.MakeMPIJob("job", "default").Queue("queue_name").Obj(),
-			wantErr: field.ErrorList{field.Invalid(queueNameLabelPath, "queue_name", invalidRFC1123Message)}.ToAggregate(),
+			wantErr: field.ErrorList{field.Invalid(queueNameLabelPath, "queue_name", testutil.InvalidRFC1123Message)}.ToAggregate(),
 		},
 		{
 			name:    "with prebuilt workload",
@@ -324,7 +321,6 @@ func TestDefault(t *testing.T) {
 		clusterQueues           []kueue.ClusterQueue
 		admissionCheck          *kueue.AdmissionCheck
 		multiKueueEnabled       bool
-		localQueueDefaulting    bool
 		topologyAwareScheduling bool
 		defaultLqExist          bool
 		want                    *v2beta1.MPIJob
@@ -525,25 +521,22 @@ func TestDefault(t *testing.T) {
 			wantManagedBy:     nil,
 		},
 		{
-			name:                 "LocalQueueDefaulting enabled, default lq is created, job doesn't have queue label",
-			localQueueDefaulting: true,
-			defaultLqExist:       true,
-			mpiJob:               testingutil.MakeMPIJob("job", "default").Obj(),
-			want:                 testingutil.MakeMPIJob("job", "default").Queue("default").Obj(),
+			name:           "default lq is created, job doesn't have queue label",
+			defaultLqExist: true,
+			mpiJob:         testingutil.MakeMPIJob("job", "default").Obj(),
+			want:           testingutil.MakeMPIJob("job", "default").Queue("default").Obj(),
 		},
 		{
-			name:                 "LocalQueueDefaulting enabled, default lq is created, job has queue label",
-			localQueueDefaulting: true,
-			defaultLqExist:       true,
-			mpiJob:               testingutil.MakeMPIJob("job", "default").Queue("queue").Obj(),
-			want:                 testingutil.MakeMPIJob("job", "default").Queue("queue").Obj(),
+			name:           "default lq is created, job has queue label",
+			defaultLqExist: true,
+			mpiJob:         testingutil.MakeMPIJob("job", "default").Queue("queue").Obj(),
+			want:           testingutil.MakeMPIJob("job", "default").Queue("queue").Obj(),
 		},
 		{
-			name:                 "LocalQueueDefaulting enabled, default lq isn't created, job doesn't have queue label",
-			localQueueDefaulting: true,
-			defaultLqExist:       false,
-			mpiJob:               testingutil.MakeMPIJob("job", "default").Obj(),
-			want:                 testingutil.MakeMPIJob("job", "default").Obj(),
+			name:           "default lq isn't created, job doesn't have queue label",
+			defaultLqExist: false,
+			mpiJob:         testingutil.MakeMPIJob("job", "default").Obj(),
+			want:           testingutil.MakeMPIJob("job", "default").Obj(),
 		},
 		{
 			name:                    "TAS enabled, RunLauncherAsWorker true with 2 replica specs",
@@ -760,7 +753,6 @@ func TestDefault(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			features.SetFeatureGateDuringTest(t, features.MultiKueue, tc.multiKueueEnabled)
-			features.SetFeatureGateDuringTest(t, features.LocalQueueDefaulting, tc.localQueueDefaulting)
 			features.SetFeatureGateDuringTest(t, features.TopologyAwareScheduling, tc.topologyAwareScheduling)
 
 			ctx, log := utiltesting.ContextWithLog(t)
@@ -768,7 +760,7 @@ func TestDefault(t *testing.T) {
 			clientBuilder := utiltesting.NewClientBuilder().WithObjects(utiltesting.MakeNamespace("default"))
 			cl := clientBuilder.Build()
 			cqCache := schdcache.New(cl)
-			queueManager := qcache.NewManager(cl, cqCache)
+			queueManager := qcache.NewManagerForUnitTests(cl, cqCache)
 
 			if tc.defaultLqExist {
 				if err := queueManager.AddLocalQueue(ctx, utiltestingapi.MakeLocalQueue("default", "default").

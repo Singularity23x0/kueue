@@ -132,6 +132,10 @@ E2E_MODE=dev make kind-image-build test-multikueue-e2e
 
 # Loop a suite (until it fails) while keeping the cluster
 E2E_MODE=dev GINKGO_ARGS="--until-it-fails" make kind-image-build  test-e2e
+
+# Skip reinstallation of kueue (works only in dev mode)
+E2E_MODE=dev E2E_SKIP_REINSTALL=true make kind-image-build test-e2e
+E2E_MODE=dev E2E_SKIP_REINSTALL=true make kind-image-build test-multikueue-e2e
 ```
 
 {{% alert title="Note" color="primary" %}}
@@ -158,6 +162,16 @@ The cluster is ready, and now you can run tests from another terminal:
 ```
 or from VSCode.
 
+## Debugging metrics with Prometheus
+
+To provision a Kind cluster with Prometheus pre-configured for metrics debugging:
+
+```shell
+E2E_MODE=dev GINKGO_ARGS="--label-filter=feature:prometheus" make kind-image-build test-e2e
+```
+
+For more details, see [Setup Dev Monitoring](/docs/tasks/dev/setup_dev_monitoring).
+
 ## Running subset of integration or e2e tests
 
 ### Use label filters for integration tests
@@ -165,7 +179,7 @@ Integration tests are labeled by controller, job type, feature, and area to enab
 
 **Label Taxonomy:**
 - Controllers: `controller:workload`, `controller:localqueue`, `controller:clusterqueue`, `controller:admissioncheck`, `controller:resourceflavor`, `controller:provisioning`
-- Job Types: `job:batch`, `job:pod`, `job:jobset`, `job:pytorch`, `job:tensorflow`, `job:mpi`, `job:paddle`, `job:xgboost`, `job:jax`, `job:train`, `job:ray`, `job:appwrapper`
+- Job Types: `job:batch`, `job:pod`, `job:jobset`, `job:pytorch`, `job:tensorflow`, `job:mpi`, `job:paddle`, `job:xgboost`, `job:jax`, `job:train`, `job:ray`, `job:appwrapper`, `job:sparkapplication`
 - Features: `feature:tas`, `feature:multikueue`, `feature:provisioning`, `feature:fairsharing`, `feature:admissionfairsharing`
 - Areas: `area:core`, `area:jobs`, `area:admissionchecks`, `area:multikueue`
 

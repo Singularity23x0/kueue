@@ -18,20 +18,19 @@ package rayjob
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	rayv1 "github.com/ray-project/kuberay/ray-operator/apis/ray/v1"
 	rayutils "github.com/ray-project/kuberay/ray-operator/controllers/ray/utils"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,6 +39,8 @@ import (
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/controller/jobframework"
+	"sigs.k8s.io/kueue/pkg/controller/jobs/ray"
+	"sigs.k8s.io/kueue/pkg/controller/jobs/raycluster"
 	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/podset"
 	"sigs.k8s.io/kueue/pkg/util/roletracker"
@@ -64,7 +65,7 @@ func init() {
 		SetupWebhook:      SetupRayJobWebhook,
 		JobType:           &rayv1.RayJob{},
 		AddToScheme:       rayv1.AddToScheme,
-		MultiKueueAdapter: &multiKueueAdapter{},
+		MultiKueueAdapter: ray.NewMKAdapter(copyJobSpec, copyJobStatus, getEmptyList, gvk, getManagedBy, setManagedBy),
 	}))
 }
 
@@ -123,6 +124,7 @@ type RayJob rayv1.RayJob
 var _ jobframework.GenericJob = (*RayJob)(nil)
 var _ jobframework.JobWithManagedBy = (*RayJob)(nil)
 var _ jobframework.JobWithSkip = (*RayJob)(nil)
+var _ jobframework.JobWithCustomAnnotations = (*RayJob)(nil)
 
 func (j *RayJob) Object() client.Object {
 	return (*rayv1.RayJob)(j)
@@ -162,129 +164,71 @@ func (j *RayJob) PodLabelSelector() string {
 	return ""
 }
 
-// buildPodSetsFromRayJobSpec builds PodSets from RayJob's RayClusterSpec
-func (j *RayJob) buildPodSetsFromRayJobSpec() ([]kueue.PodSet, error) {
-	podSets := make([]kueue.PodSet, 0)
-
-	// head
-	headPodSet := kueue.PodSet{
-		Name:     headGroupPodSetName,
-		Template: *j.Spec.RayClusterSpec.HeadGroupSpec.Template.DeepCopy(),
-		Count:    1,
-	}
-	if features.Enabled(features.TopologyAwareScheduling) {
-		topologyRequest, err := jobframework.NewPodSetTopologyRequest(
-			&j.Spec.RayClusterSpec.HeadGroupSpec.Template.ObjectMeta).Build()
-		if err != nil {
-			return nil, err
-		}
-		headPodSet.TopologyRequest = topologyRequest
-	}
-	podSets = append(podSets, headPodSet)
-
-	// workers
-	for index := range j.Spec.RayClusterSpec.WorkerGroupSpecs {
-		wgs := &j.Spec.RayClusterSpec.WorkerGroupSpecs[index]
-		count := int32(1)
-		if wgs.Replicas != nil {
-			count = *wgs.Replicas
-		}
-		if wgs.NumOfHosts > 1 {
-			count *= wgs.NumOfHosts
-		}
-		workerPodSet := kueue.PodSet{
-			Name:     kueue.NewPodSetReference(wgs.GroupName),
-			Template: *wgs.Template.DeepCopy(),
-			Count:    count,
-		}
-		if features.Enabled(features.TopologyAwareScheduling) {
-			topologyRequest, err := jobframework.NewPodSetTopologyRequest(&wgs.Template.ObjectMeta).Build()
-			if err != nil {
-				return nil, err
-			}
-			workerPodSet.TopologyRequest = topologyRequest
-		}
-		podSets = append(podSets, workerPodSet)
-	}
-
-	// submitter Job
-	return j.addSubmitterPodSet(podSets)
-}
-
 func (j *RayJob) PodSets(ctx context.Context) ([]kueue.PodSet, error) {
-	log := ctrl.LoggerFrom(ctx)
-
 	// Always build PodSets from RayJob spec first
-	podSets, err := j.buildPodSetsFromRayJobSpec()
+	podSets, err := raycluster.BuildPodSets(j.Spec.RayClusterSpec)
 	if err != nil {
 		return nil, err
 	}
 
-	// Only update podSets from RayCluster if:
-	// 1. The job is workload slicing enabled
-	// 2. AND the job has enableInTreeAutoscaling
-	if workloadslicing.Enabled(j.Object()) && ptr.Deref(j.Spec.RayClusterSpec.EnableInTreeAutoscaling, false) {
-		// If RayClusterName is set in status, try to fetch the RayCluster and update PodSets from it
-		if j.Status.RayClusterName != "" {
-			var rayClusterObj rayv1.RayCluster
-			err := reconciler.client.Get(ctx, types.NamespacedName{
-				Namespace: j.Namespace,
-				Name:      j.Status.RayClusterName,
-			}, &rayClusterObj)
-			if err != nil {
-				// Check if the error is a NotFound error
-				if apierrors.IsNotFound(err) {
-					log.V(2).Info("RayCluster does not exist, falling back to RayJob spec",
-						"rayCluster", j.Status.RayClusterName)
-				} else {
-					return nil, fmt.Errorf("failed to get RayCluster %s: %w", j.Status.RayClusterName, err)
-				}
-			} else {
-				// Create a map of podSets from RayJob spec for quick lookup by name
-				podSetMap := make(map[kueue.PodSetReference]*kueue.PodSet)
-				for i := range podSets {
-					// Skip submitter PodSet as it's not in RayCluster
-					if podSets[i].Name != submitterJobPodSetName {
-						podSetMap[podSets[i].Name] = &podSets[i]
-					}
-				}
+	podSets, err = j.addSubmitterPodSet(podSets)
+	if err != nil {
+		return nil, err
+	}
 
-				// Iterate through RayCluster's worker groups and update the count in matching podSets
-				for i := range rayClusterObj.Spec.WorkerGroupSpecs {
-					wgs := &rayClusterObj.Spec.WorkerGroupSpecs[i]
-					podSetName := kueue.NewPodSetReference(wgs.GroupName)
-
-					podSet, exists := podSetMap[podSetName]
-					if !exists {
-						return nil, fmt.Errorf("PodSet name mismatch: RayCluster %s has worker group %s which is not found in RayJob %s spec", j.Status.RayClusterName, wgs.GroupName, j.Name)
-					}
-
-					if wgs.Replicas == nil {
-						continue
-					}
-
-					// Calculate the count based on RayCluster's worker group replicas
-					count := *wgs.Replicas
-					if wgs.NumOfHosts > 1 {
-						count *= wgs.NumOfHosts
-					}
-
-					// Update the count in the PodSet only if it's different
-					if podSet.Count != count {
-						log.V(2).Info("Updated RayJob PodSet worker count from RayCluster",
-							"rayJob", j.Name,
-							"rayCluster", j.Status.RayClusterName,
-							"workerGroup", wgs.GroupName,
-							"oldCount", podSet.Count,
-							"newCount", count)
-						podSet.Count = count
-					}
-				}
-			}
-		}
+	rayClusterName := j.Status.RayClusterName
+	podSets, err = raycluster.UpdatePodSets(ctx, podSets, reconciler.client, j.Object(), j.Spec.RayClusterSpec.EnableInTreeAutoscaling, rayClusterName)
+	if err != nil {
+		return nil, err
 	}
 
 	return podSets, nil
+}
+
+// podSetReplicaSize is a minimal representation of a PodSet for the
+// PodsetReplicaSizesAnnotation, containing only name and count.
+type podSetReplicaSize struct {
+	Name  kueue.PodSetReference `json:"name"`
+	Count int32                 `json:"count"`
+}
+
+// comparePodSetCounts returns true if any PodSet count differs from referenceCounts.
+func comparePodSetCounts(podSets []kueue.PodSet, referenceCounts map[kueue.PodSetReference]int32) bool {
+	if len(podSets) != len(referenceCounts) {
+		return true
+	}
+	for _, ps := range podSets {
+		if refCount, ok := referenceCounts[ps.Name]; !ok || ps.Count != refCount {
+			return true
+		}
+	}
+	return false
+}
+
+// parsePodSetReplicaSizes parses the PodsetReplicaSizesAnnotation value into a map.
+// Returns an empty map if the annotation is absent or empty.
+func parsePodSetReplicaSizes(annotation string) (map[kueue.PodSetReference]int32, error) {
+	counts := make(map[kueue.PodSetReference]int32)
+	if annotation == "" {
+		return counts, nil
+	}
+	var podSets []podSetReplicaSize
+	if err := json.Unmarshal([]byte(annotation), &podSets); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal %s annotation: %w", jobframework.PodsetReplicaSizesAnnotation, err)
+	}
+	for _, ps := range podSets {
+		counts[ps.Name] = ps.Count
+	}
+	return counts, nil
+}
+
+// serializePodSetCounts converts PodSets into a JSON byte slice of podSetReplicaSize entries.
+func serializePodSetCounts(podSets []kueue.PodSet) ([]byte, error) {
+	sizes := make([]podSetReplicaSize, len(podSets))
+	for i, ps := range podSets {
+		sizes[i] = podSetReplicaSize{Name: ps.Name, Count: ps.Count}
+	}
+	return json.Marshal(sizes)
 }
 
 func (j *RayJob) RunWithPodSetsInfo(ctx context.Context, podSetsInfo []podset.PodSetInfo) error {
@@ -299,20 +243,9 @@ func (j *RayJob) RunWithPodSetsInfo(ctx context.Context, podSetsInfo []podset.Po
 
 	j.Spec.Suspend = false
 
-	// head
-	headPod := &j.Spec.RayClusterSpec.HeadGroupSpec.Template
-	info := podSetsInfo[0]
-	if err := podset.Merge(&headPod.ObjectMeta, &headPod.Spec, info); err != nil {
+	err := raycluster.UpdateRayClusterSpecToRunWithPodSetsInfo(j.Spec.RayClusterSpec, podSetsInfo)
+	if err != nil {
 		return err
-	}
-
-	// workers
-	for index := range j.Spec.RayClusterSpec.WorkerGroupSpecs {
-		workerPod := &j.Spec.RayClusterSpec.WorkerGroupSpecs[index].Template
-		info := podSetsInfo[index+1]
-		if err := podset.Merge(&workerPod.ObjectMeta, &workerPod.Spec, info); err != nil {
-			return err
-		}
 	}
 
 	// submitter
@@ -337,16 +270,7 @@ func (j *RayJob) RestorePodSetsInfo(podSetsInfo []podset.PodSetInfo) bool {
 		return false
 	}
 
-	// head
-	headPod := &j.Spec.RayClusterSpec.HeadGroupSpec.Template
-	changed := podset.RestorePodSpec(&headPod.ObjectMeta, &headPod.Spec, podSetsInfo[0])
-
-	// workers
-	for index := range j.Spec.RayClusterSpec.WorkerGroupSpecs {
-		workerPod := &j.Spec.RayClusterSpec.WorkerGroupSpecs[index].Template
-		info := podSetsInfo[index+1]
-		changed = podset.RestorePodSpec(&workerPod.ObjectMeta, &workerPod.Spec, info) || changed
-	}
+	changed := raycluster.RestorePodSetsInfo(j.Spec.RayClusterSpec, podSetsInfo)
 
 	// submitter
 	if j.Spec.SubmissionMode == rayv1.K8sJobMode {
@@ -367,6 +291,30 @@ func (j *RayJob) Finished(ctx context.Context) (message string, success, finishe
 
 func (j *RayJob) PodsReady(ctx context.Context) bool {
 	return j.Status.RayClusterStatus.State == rayv1.Ready
+}
+
+func (j *RayJob) GetCustomAnnotations(ctx context.Context, c client.Client, podSets []kueue.PodSet) (map[string]string, error) {
+	if workloadslicing.Enabled(j.Object()) {
+		previousCounts, err := parsePodSetReplicaSizes(j.Annotations[jobframework.PodsetReplicaSizesAnnotation])
+		if err != nil {
+			return nil, err
+		}
+
+		// Compare current counts against previous annotation. If any differ, update the in-memory
+		// annotation with ALL current podSet counts (not just the changed ones). The actual API server
+		// patch is handled by the reconciler.
+		changed := comparePodSetCounts(podSets, previousCounts)
+		if changed {
+			podSetsJSON, err := serializePodSetCounts(podSets)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal updated podsets: %w", err)
+			}
+			return map[string]string{
+				jobframework.PodsetReplicaSizesAnnotation: string(podSetsJSON),
+			}, nil
+		}
+	}
+	return nil, nil
 }
 
 func SetupIndexes(ctx context.Context, indexer client.FieldIndexer) error {

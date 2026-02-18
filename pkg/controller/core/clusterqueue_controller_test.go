@@ -207,7 +207,7 @@ func TestUpdateCqStatusIfChanged(t *testing.T) {
 			cl := utiltesting.NewClientBuilder().WithLists(defaultWls).WithObjects(lq, cq).WithStatusSubresource(lq, cq).
 				Build()
 			cqCache := schdcache.New(cl)
-			qManager := qcache.NewManager(cl, cqCache)
+			qManager := qcache.NewManagerForUnitTests(cl, cqCache)
 			if tc.insertCqIntoCache {
 				if err := cqCache.AddClusterQueue(ctx, cq); err != nil {
 					t.Fatalf("Inserting clusterQueue in cache: %v", err)
@@ -271,7 +271,7 @@ func TestReconcileRemovesFinalizerWithFinishedWorkloads(t *testing.T) {
 
 			cl := utiltesting.NewClientBuilder().WithObjects(cq).Build()
 			cqCache := schdcache.New(cl)
-			qManager := qcache.NewManager(cl, cqCache)
+			qManager := qcache.NewManagerForUnitTests(cl, cqCache)
 			if err := cqCache.AddClusterQueue(ctx, cq); err != nil {
 				t.Fatalf("Inserting clusterQueue in cache: %v", err)
 			}
@@ -554,14 +554,14 @@ func TestRecordResourceMetrics(t *testing.T) {
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			recordResourceMetrics(tc.queue, nil)
+			recordResourceMetrics(tc.queue, nil, nil)
 			gotMetrics := allMetricsForQueue(tc.queue.Name)
 			if diff := cmp.Diff(tc.wantMetrics, gotMetrics, opts...); len(diff) != 0 {
 				t.Errorf("Unexpected metrics (-want,+got):\n%s", diff)
 			}
 
 			if tc.updatedQueue != nil {
-				updateResourceMetrics(tc.queue, tc.updatedQueue, nil)
+				updateResourceMetrics(tc.queue, tc.updatedQueue, nil, nil)
 				gotMetricsAfterUpdate := allMetricsForQueue(tc.queue.Name)
 				if diff := cmp.Diff(tc.wantUpdatedMetrics, gotMetricsAfterUpdate, opts...); len(diff) != 0 {
 					t.Errorf("Unexpected metrics (-want,+got):\n%s", diff)

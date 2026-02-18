@@ -23,7 +23,7 @@ const (
 	QueueLabel = "kueue.x-k8s.io/queue-name"
 
 	// DefaultLocalQueueName is the name for default LocalQueue that is applied
-	// if the feature LocalQueueDefaulting is enabled and QueueLabel is not specified.
+	// if QueueLabel is not specified.
 	DefaultLocalQueueName kueue.LocalQueueName = "default"
 
 	// PrebuiltWorkloadLabel is the label key of the job holding the name of the pre-built workload to use.
@@ -44,10 +44,10 @@ const (
 	// MaxExecTimeSecondsLabel is the label key in the job that holds the maximum execution time.
 	MaxExecTimeSecondsLabel = `kueue.x-k8s.io/max-exec-time-seconds`
 
-	// SafeToForcefullyTerminateAnnotationKey is the annotation key that controls whether a pod opted in to FailureRecoveryPolicy.
-	SafeToForcefullyTerminateAnnotationKey = "kueue.x-k8s.io/safe-to-forcefully-terminate"
-	// SafeToForcefullyTerminateAnnotationValue is the value of that annotation that enables FailureRecoveryPolicy for that pod.
-	SafeToForcefullyTerminateAnnotationValue = "true"
+	// SafeToForcefullyDeleteAnnotationKey is the annotation key that controls whether a pod opted in to FailureRecoveryPolicy.
+	SafeToForcefullyDeleteAnnotationKey = "kueue.x-k8s.io/safe-to-forcefully-delete"
+	// SafeToForcefullyDeleteAnnotationValue is the value of that annotation that enables FailureRecoveryPolicy for that pod.
+	SafeToForcefullyDeleteAnnotationValue = "true"
 
 	// JobOwnerGVKAnnotation is the annotation key in the workload that holds the GVK of the owner job.
 	JobOwnerGVKAnnotation = "kueue.x-k8s.io/job-owner-gvk"
@@ -58,4 +58,13 @@ const (
 	// ComponentWorkloadIndexAnnotation stores the numeric index for component workloads
 	// in multi-workload jobs (e.g., LeaderWorkerSet replicas).
 	ComponentWorkloadIndexAnnotation = "kueue.x-k8s.io/component-workload-index"
+
+	// MultiKueuePreemptionGate is the name of the preemption gate managed by MultiKueue.
+	// This gate is automatically applied to remote Workloads to eliminate parallel preemptions.
+	MultiKueuePreemptionGate = "kueue.x-k8s.io/multikueue"
+
+	// PriorityBoostAnnotationKey is the annotation key on a Workload that allows
+	// external controllers to adjust a workload's effective priority.
+	// Positive values increase priority; negative values decrease it.
+	PriorityBoostAnnotationKey = "kueue.x-k8s.io/priority-boost"
 )

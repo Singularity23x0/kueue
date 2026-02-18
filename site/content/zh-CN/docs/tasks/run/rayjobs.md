@@ -62,7 +62,11 @@ spec:
                     cpu: "1"
 ```
 
-### c. 限制 {#c-limitations}
+### c. Suspend 控制 {#c-suspend-control}
+
+Kueue 控制 RayJob 的 `spec.suspend` 字段。当 RayJob 被 Kueue 接纳时，Kueue 会通过将 `spec.suspend` 设置为 `false` 来取消暂停，无论其之前的值是什么。
+
+### d. 限制 {#d-limitations}
 
 - 一个 Kueue 管理的 RayJob 不能使用现有的 RayCluster。
 - RayCluster 应在作业执行结束后删除，`spec.ShutdownAfterJobFinishes` 应为 `true`。
@@ -119,4 +123,23 @@ ElasticJobsViaWorkloadSlices: true
 spec:
   rayClusterSpec:
     enableInTreeAutoscaling: true
+```
+
+### 带有动态扩容的 RayJob 示例
+
+在本例中，代码通过 ConfigMap 提供给 Ray 框架。
+
+{{< include "examples/jobs/ray-job-autoscaling-code-sample.yaml" "yaml" >}}
+
+RayJob 如下所示：
+
+{{< include "examples/jobs/ray-job-autoscaling-sample.yaml" "yaml" >}}
+
+你可以使用以下命令运行此 RayJob：
+
+```sh
+# 创建代码 ConfigMap（一次）
+kubectl apply -f ray-job-autoscaling-code-sample.yaml
+# 创建 RayJob。你可以多次运行此命令，以观察作业的排队和准入。
+kubectl create -f ray-job-autoscaling-sample.yaml
 ```

@@ -36,11 +36,9 @@ import (
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/cache/hierarchy"
-	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/resources"
 	"sigs.k8s.io/kueue/pkg/util/queue"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
@@ -101,12 +99,11 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 		return nil
 	}
 	cases := []struct {
-		name                string
-		operation           func(log logr.Logger, cache *Cache) error
-		clientObjects       []client.Object
-		wantClusterQueues   map[kueue.ClusterQueueReference]*clusterQueue
-		wantCohorts         map[kueue.CohortReference]sets.Set[kueue.ClusterQueueReference]
-		disableLendingLimit bool
+		name              string
+		operation         func(log logr.Logger, cache *Cache) error
+		clientObjects     []client.Object
+		wantClusterQueues map[kueue.ClusterQueueReference]*clusterQueue
+		wantCohorts       map[kueue.CohortReference]sets.Set[kueue.ClusterQueueReference]
 	}{
 		{
 			name: "add",
@@ -1011,70 +1008,6 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 			},
 		},
 		{
-			name:                "should not populate the fields with lendingLimit when feature disabled",
-			disableLendingLimit: true,
-			operation: func(log logr.Logger, cache *Cache) error {
-				cq := utiltestingapi.MakeClusterQueue("foo").
-					ResourceGroup(
-						kueue.FlavorQuotas{
-							Name: "on-demand",
-							Resources: []kueue.ResourceQuota{
-								{
-									Name:         corev1.ResourceCPU,
-									NominalQuota: resource.MustParse("10"),
-									LendingLimit: ptr.To(resource.MustParse("8")),
-								},
-								{
-									Name:         corev1.ResourceMemory,
-									NominalQuota: resource.MustParse("10Gi"),
-									LendingLimit: ptr.To(resource.MustParse("8Gi")),
-								},
-							},
-						},
-						kueue.FlavorQuotas{
-							Name: "spot",
-							Resources: []kueue.ResourceQuota{
-								{
-									Name:         corev1.ResourceCPU,
-									NominalQuota: resource.MustParse("20"),
-									LendingLimit: ptr.To(resource.MustParse("20")),
-								},
-								{
-									Name:         corev1.ResourceMemory,
-									NominalQuota: resource.MustParse("20Gi"),
-									LendingLimit: ptr.To(resource.MustParse("20Gi")),
-								},
-							},
-						},
-					).
-					ResourceGroup(
-						kueue.FlavorQuotas{
-							Name: "license",
-							Resources: []kueue.ResourceQuota{
-								{
-									Name:         "license",
-									NominalQuota: resource.MustParse("8"),
-									LendingLimit: ptr.To(resource.MustParse("4")),
-								},
-							},
-						},
-					).
-					Obj()
-				return cache.AddClusterQueue(ctx, cq)
-			},
-			wantClusterQueues: map[kueue.ClusterQueueReference]*clusterQueue{
-				"foo": {
-					Name:                          "foo",
-					NamespaceSelector:             labels.Everything(),
-					Status:                        pending,
-					Preemption:                    defaultPreemption,
-					AllocatableResourceGeneration: 1,
-					FlavorFungibility:             defaultFlavorFungibility,
-					FairWeight:                    defaultWeight,
-				},
-			},
-		},
-		{
 			name: "create cohort",
 			operation: func(log logr.Logger, cache *Cache) error {
 				cohort := utiltestingapi.MakeCohort("cohort").Obj()
@@ -1125,16 +1058,13 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, log := utiltesting.ContextWithLog(t)
-			if tc.disableLendingLimit {
-				features.SetFeatureGateDuringTest(t, features.LendingLimit, false)
-			}
 			cache := New(utiltesting.NewFakeClient(tc.clientObjects...))
 			if err := tc.operation(log, cache); err != nil {
 				t.Errorf("Unexpected error during test operation: %s", err)
 			}
 			if diff := cmp.Diff(tc.wantClusterQueues, cache.hm.ClusterQueues(),
 				cmpopts.IgnoreFields(clusterQueue{}, "ResourceGroups"),
-				cmpopts.IgnoreFields(workload.Info{}, "Obj", "LastAssignment"),
+				cmpopts.IgnoreFields(workload.Info{}, "Obj", "LastAssignment", "SchedulingHash"),
 				cmpopts.IgnoreUnexported(clusterQueue{}, hierarchy.ClusterQueue[*cohort]{}),
 				cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("Unexpected clusterQueues (-want,+got):\n%s", diff)
@@ -3282,8 +3212,7 @@ func TestClusterQueueReadiness(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			ctx, _ := utiltesting.ContextWithLog(t)
-			_, log := utiltesting.ContextWithLog(t)
+			ctx, log := utiltesting.ContextWithLog(t)
 			cache := New(utiltesting.NewFakeClient())
 			for _, rf := range tc.resourceFlavors {
 				cache.AddOrUpdateResourceFlavor(log, rf)
@@ -3639,70 +3568,6 @@ func TestCohortCycles(t *testing.T) {
 			}
 		}
 	})
-}
-
-// TestSnapshotError tests the negative scenario when an error is returned while
-// using TopologyAwareScheduling
-func TestSnapshotError(t *testing.T) {
-	var (
-		connectionRefusedErr = errors.New("connection refused")
-	)
-	features.SetFeatureGateDuringTest(t, features.TopologyAwareScheduling, true)
-	ctx, log := utiltesting.ContextWithLog(t)
-
-	topology := *utiltestingapi.MakeDefaultOneLevelTopology("default")
-	flavor := *utiltestingapi.MakeResourceFlavor("tas-default").
-		TopologyName("default").
-		Obj()
-	localQueue := *utiltestingapi.MakeLocalQueue("lq", "default").ClusterQueue("cq").Obj()
-	clusterQueue := utiltestingapi.MakeClusterQueue("cq").
-		ResourceGroup(
-			*utiltestingapi.MakeFlavorQuotas("tas-default").
-				ResourceQuotaWrapper("cpu").NominalQuota("8").Append().
-				Obj(),
-		).ClusterQueue
-
-	clientBuilder := utiltesting.NewClientBuilder()
-	clientBuilder.WithObjects(&topology)
-	clientBuilder.WithObjects(&localQueue)
-	clientBuilder.WithObjects(&clusterQueue)
-	kcBuilder := clientBuilder.
-		WithInterceptorFuncs(interceptor.Funcs{
-			List: func(ctx context.Context, client client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-				_, isNodeList := list.(*corev1.NodeList)
-				if isNodeList {
-					if connectionRefusedErr != nil {
-						return connectionRefusedErr
-					}
-				}
-				return client.List(ctx, list, opts...)
-			},
-		})
-	kcBuilder.WithObjects(&flavor)
-	client := kcBuilder.Build()
-	cache := New(client)
-	cache.AddOrUpdateResourceFlavor(log, &flavor)
-	if flavor.Spec.TopologyName != nil {
-		cache.AddOrUpdateTopology(log, &kueue.Topology{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: string(*flavor.Spec.TopologyName),
-			},
-			Spec: kueue.TopologySpec{
-				Levels: []kueue.TopologyLevel{
-					{
-						NodeLabel: corev1.LabelHostname,
-					},
-				},
-			},
-		})
-	}
-	if err := cache.AddClusterQueue(ctx, &clusterQueue); err != nil {
-		t.Fatalf("failed to add CQ: %v", err)
-	}
-	_, gotErr := cache.Snapshot(ctx)
-	if diff := cmp.Diff(connectionRefusedErr, gotErr, cmpopts.EquateErrors()); diff != "" {
-		t.Fatalf("Unexpected error (-want/+got)\n%s", diff)
-	}
 }
 
 func TestClusterQueueAncestors(t *testing.T) {

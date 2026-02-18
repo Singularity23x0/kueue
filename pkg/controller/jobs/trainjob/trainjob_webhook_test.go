@@ -37,10 +37,7 @@ import (
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
 	testingjobset "sigs.k8s.io/kueue/pkg/util/testingjobs/jobset"
 	testingtrainjob "sigs.k8s.io/kueue/pkg/util/testingjobs/trainjob"
-)
-
-const (
-	invalidRFC1123Message = `a lowercase RFC 1123 subdomain must consist of lower case alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character (e.g. 'example.com', regex used for validation is '[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*')`
+	testutil "sigs.k8s.io/kueue/test/util"
 )
 
 var (
@@ -76,7 +73,7 @@ func TestValidateCreate(t *testing.T) {
 		"invalid queue-name label": {
 			clusterTrainingRuntime: testCtr,
 			trainJob:               testTrainJob.Clone().Queue("queue_name").Obj(),
-			wantErr:                field.ErrorList{field.Invalid(queueNameLabelPath, "queue_name", invalidRFC1123Message)}.ToAggregate(),
+			wantErr:                field.ErrorList{field.Invalid(queueNameLabelPath, "queue_name", testutil.InvalidRFC1123Message)}.ToAggregate(),
 		},
 		"with prebuilt workload": {
 			clusterTrainingRuntime: testCtr,
@@ -205,7 +202,6 @@ func TestDefault(t *testing.T) {
 	testCases := map[string]struct {
 		trainJob                     *kftrainerapi.TrainJob
 		defaultQueue                 *kueue.LocalQueue
-		localQueueDefaultingEnabled  bool
 		manageJobsWithoutQueueName   bool
 		withMultiKueueAdmissionCheck bool
 		withDefaultLocalQueue        bool
@@ -238,14 +234,12 @@ func TestDefault(t *testing.T) {
 				Queue(string(controllerconstants.DefaultLocalQueueName)).
 				JobSetLabel(controllerconstants.QueueLabel, string(controllerconstants.DefaultLocalQueueName)).
 				Obj(),
-			localQueueDefaultingEnabled: true,
-			withDefaultLocalQueue:       true,
+			withDefaultLocalQueue: true,
 		},
 		"should not set the default local queue if doesn't exists": {
-			trainJob:                    testTrainJob.Clone().Obj(),
-			wantTrainJob:                testTrainJob.Clone().Obj(),
-			localQueueDefaultingEnabled: true,
-			withDefaultLocalQueue:       false,
+			trainJob:              testTrainJob.Clone().Obj(),
+			wantTrainJob:          testTrainJob.Clone().Obj(),
+			withDefaultLocalQueue: false,
 		},
 		"should set managedBy to multiKueue if the user didn't specify any": {
 			trainJob: testTrainJob.Clone().Queue(testLocalQueue.Name).Obj(),
@@ -281,13 +275,12 @@ func TestDefault(t *testing.T) {
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
 			features.SetFeatureGateDuringTest(t, features.MultiKueue, tc.multiKueueEnabled)
-			features.SetFeatureGateDuringTest(t, features.LocalQueueDefaulting, tc.localQueueDefaultingEnabled)
 
 			ctx, log := utiltesting.ContextWithLog(t)
 
 			kClient := utiltesting.NewClientBuilder().WithObjects(testNamespace.Obj()).Build()
 			cqCache := schdcache.New(kClient)
-			queueManager := qcache.NewManager(kClient, cqCache)
+			queueManager := qcache.NewManagerForUnitTests(kClient, cqCache)
 
 			cq := testClusterQueue.Clone()
 			if tc.withMultiKueueAdmissionCheck {

@@ -30,9 +30,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+	"k8s.io/component-base/featuregate"
 	"k8s.io/utils/ptr"
 
 	configapi "sigs.k8s.io/kueue/apis/config/v1beta2"
+	"sigs.k8s.io/kueue/pkg/features"
 )
 
 func TestValidate(t *testing.T) {
@@ -972,45 +974,114 @@ func TestValidate(t *testing.T) {
 
 func TestValidateFeatureGates(t *testing.T) {
 	cases := map[string]struct {
-		featureGatesCLI string
-		featureGateMap  map[string]bool
-		errorStr        string
+		featureGatesCLI   string
+		featureGateMap    map[string]bool
+		setupFeatureGates map[featuregate.Feature]bool
+		wantErr           field.ErrorList
 	}{
 		"no feature gates is null": {
 			featureGatesCLI: "",
-			featureGateMap:  nil,
-			errorStr:        "",
 		},
 		"feature gate cli": {
 			featureGatesCLI: "test:true",
-			featureGateMap:  nil,
-			errorStr:        "",
 		},
 		"cannot specify both feature gates": {
 			featureGatesCLI: "test:true",
 			featureGateMap:  map[string]bool{"test": true},
-
-			errorStr: "feature gates for CLI and configuration cannot both specified",
-		},
-		"cannot specify more than one TAS profile using GateMap": {
-			featureGateMap: map[string]bool{"TASProfileMixed": true,
-				"TASProfileLeastFreeCapacity": true},
-			errorStr: "Cannot use more than one TAS profiles",
-		},
-		"cannot specify more than one TAS profile using GatesCLI": {
-			featureGatesCLI: "TASProfileLeastFreeCapacity:true,TASProfileMixed:true",
-			errorStr:        "Cannot use more than one TAS profiles",
+			wantErr: field.ErrorList{
+				&field.Error{
+					Type:   field.ErrorTypeInvalid,
+					Field:  "featureGates",
+					Detail: "feature gates for CLI and configuration cannot both specified",
+				},
+			},
 		},
 		"cannot set TAS profile with TAS disabled": {
-			featureGateMap: map[string]bool{"TASProfileLeastFreeCapacity": true},
-			errorStr:       "Cannot use a TAS profile with TAS disabled",
+			setupFeatureGates: map[featuregate.Feature]bool{
+				features.TASProfileMixed:         true,
+				features.TopologyAwareScheduling: false,
+			},
+			wantErr: field.ErrorList{
+				&field.Error{
+					Type:   field.ErrorTypeInvalid,
+					Field:  "featureGates",
+					Detail: "cannot use a TAS profile with TAS disabled",
+				},
+			},
+		},
+		"ElasticJobsViaWorkloadSlicesWithTAS requires ElasticJobsViaWorkloadSlices": {
+			setupFeatureGates: map[featuregate.Feature]bool{
+				features.ElasticJobsViaWorkloadSlicesWithTAS: true,
+				features.TopologyAwareScheduling:             true,
+				features.ElasticJobsViaWorkloadSlices:        false,
+				features.TASProfileMixed:                     false,
+			},
+			wantErr: field.ErrorList{
+				&field.Error{
+					Type:   field.ErrorTypeInvalid,
+					Field:  "featureGates",
+					Detail: "ElasticJobsViaWorkloadSlicesWithTAS requires ElasticJobsViaWorkloadSlices to be enabled",
+				},
+			},
+		},
+		"ElasticJobsViaWorkloadSlicesWithTAS requires TopologyAwareScheduling": {
+			setupFeatureGates: map[featuregate.Feature]bool{
+				features.ElasticJobsViaWorkloadSlicesWithTAS: true,
+				features.ElasticJobsViaWorkloadSlices:        true,
+				features.TopologyAwareScheduling:             false,
+				features.TASProfileMixed:                     false,
+			},
+			wantErr: field.ErrorList{
+				&field.Error{
+					Type:   field.ErrorTypeInvalid,
+					Field:  "featureGates",
+					Detail: "ElasticJobsViaWorkloadSlicesWithTAS requires TopologyAwareScheduling to be enabled",
+				},
+			},
+		},
+		"ElasticJobsViaWorkloadSlicesWithTAS valid when all dependencies enabled": {
+			setupFeatureGates: map[featuregate.Feature]bool{
+				features.ElasticJobsViaWorkloadSlicesWithTAS: true,
+				features.ElasticJobsViaWorkloadSlices:        true,
+				features.TopologyAwareScheduling:             true,
+				features.TASProfileMixed:                     false,
+			},
+		},
+		"multiple FG validation errors at once": {
+			setupFeatureGates: map[featuregate.Feature]bool{
+				features.TASProfileMixed:                     true,
+				features.TopologyAwareScheduling:             false,
+				features.ElasticJobsViaWorkloadSlicesWithTAS: true,
+				features.ElasticJobsViaWorkloadSlices:        false,
+			},
+			wantErr: field.ErrorList{
+				&field.Error{
+					Type:   field.ErrorTypeInvalid,
+					Field:  "featureGates",
+					Detail: "cannot use a TAS profile with TAS disabled",
+				},
+				&field.Error{
+					Type:   field.ErrorTypeInvalid,
+					Field:  "featureGates",
+					Detail: "ElasticJobsViaWorkloadSlicesWithTAS requires ElasticJobsViaWorkloadSlices to be enabled",
+				},
+				&field.Error{
+					Type:   field.ErrorTypeInvalid,
+					Field:  "featureGates",
+					Detail: "ElasticJobsViaWorkloadSlicesWithTAS requires TopologyAwareScheduling to be enabled",
+				},
+			},
 		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
+			// Set up feature gates for this test
+			for fg, enabled := range tc.setupFeatureGates {
+				features.SetFeatureGateDuringTest(t, fg, enabled)
+			}
 			got := ValidateFeatureGates(tc.featureGatesCLI, tc.featureGateMap)
-			if got != nil && tc.errorStr != got.Error() {
-				t.Errorf("Unexpected result from ValidateFeatureGates\nwant:\n%v\ngot:%v\n", tc.errorStr, got.Error())
+			if diff := cmp.Diff(tc.wantErr, got, cmpopts.IgnoreFields(field.Error{}, "BadValue")); diff != "" {
+				t.Errorf("Unexpected result from ValidateFeatureGates (-want,+got):\n%s", diff)
 			}
 		})
 	}
@@ -1447,6 +1518,207 @@ func TestValidateDeviceClassMappings(t *testing.T) {
 			got := validateDeviceClassMappings(tc.cfg)
 			if diff := cmp.Diff(tc.wantErr, got, cmpopts.IgnoreFields(field.Error{}, "BadValue", "Detail")); diff != "" {
 				t.Errorf("validateDeviceClassMappings() returned unexpected error (-want,+got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestValidateCustomLabels(t *testing.T) {
+	testCases := map[string]struct {
+		cfg     *configapi.Configuration
+		wantErr field.ErrorList
+	}{
+		"empty custom labels": {
+			cfg: &configapi.Configuration{},
+		},
+		"valid name only": {
+			cfg: &configapi.Configuration{
+				ControllerManager: configapi.ControllerManager{
+					Metrics: configapi.ControllerMetrics{
+						CustomLabels: []configapi.ControllerMetricsCustomLabel{
+							{Name: "team"},
+						},
+					},
+				},
+			},
+		},
+		"valid with sourceLabelKey": {
+			cfg: &configapi.Configuration{
+				ControllerManager: configapi.ControllerManager{
+					Metrics: configapi.ControllerMetrics{
+						CustomLabels: []configapi.ControllerMetricsCustomLabel{
+							{Name: "team", SourceLabelKey: "org.example.com/team"},
+						},
+					},
+				},
+			},
+		},
+		"valid with sourceAnnotationKey": {
+			cfg: &configapi.Configuration{
+				ControllerManager: configapi.ControllerManager{
+					Metrics: configapi.ControllerMetrics{
+						CustomLabels: []configapi.ControllerMetricsCustomLabel{
+							{Name: "cost_center", SourceAnnotationKey: "billing.example.com/cost-center"},
+						},
+					},
+				},
+			},
+		},
+		"valid multiple entries": {
+			cfg: &configapi.Configuration{
+				ControllerManager: configapi.ControllerManager{
+					Metrics: configapi.ControllerMetrics{
+						CustomLabels: []configapi.ControllerMetricsCustomLabel{
+							{Name: "team"},
+							{Name: "env", SourceLabelKey: "environment"},
+							{Name: "cost", SourceAnnotationKey: "billing/cost"},
+						},
+					},
+				},
+			},
+		},
+		"invalid name - special chars": {
+			cfg: &configapi.Configuration{
+				ControllerManager: configapi.ControllerManager{
+					Metrics: configapi.ControllerMetrics{
+						CustomLabels: []configapi.ControllerMetricsCustomLabel{
+							{Name: "team-name"},
+						},
+					},
+				},
+			},
+			wantErr: field.ErrorList{
+				&field.Error{
+					Type:  field.ErrorTypeInvalid,
+					Field: "metrics.customLabels[0].name",
+				},
+			},
+		},
+		"invalid name - leading digit": {
+			cfg: &configapi.Configuration{
+				ControllerManager: configapi.ControllerManager{
+					Metrics: configapi.ControllerMetrics{
+						CustomLabels: []configapi.ControllerMetricsCustomLabel{
+							{Name: "1team"},
+						},
+					},
+				},
+			},
+			wantErr: field.ErrorList{
+				&field.Error{
+					Type:  field.ErrorTypeInvalid,
+					Field: "metrics.customLabels[0].name",
+				},
+			},
+		},
+		"invalid name - empty": {
+			cfg: &configapi.Configuration{
+				ControllerManager: configapi.ControllerManager{
+					Metrics: configapi.ControllerMetrics{
+						CustomLabels: []configapi.ControllerMetricsCustomLabel{
+							{Name: ""},
+						},
+					},
+				},
+			},
+			wantErr: field.ErrorList{
+				&field.Error{
+					Type:  field.ErrorTypeInvalid,
+					Field: "metrics.customLabels[0].name",
+				},
+				&field.Error{
+					Type:  field.ErrorTypeInvalid,
+					Field: "metrics.customLabels[0].name",
+				},
+			},
+		},
+		"duplicate names": {
+			cfg: &configapi.Configuration{
+				ControllerManager: configapi.ControllerManager{
+					Metrics: configapi.ControllerMetrics{
+						CustomLabels: []configapi.ControllerMetricsCustomLabel{
+							{Name: "team"},
+							{Name: "team"},
+						},
+					},
+				},
+			},
+			wantErr: field.ErrorList{
+				&field.Error{
+					Type:  field.ErrorTypeDuplicate,
+					Field: "metrics.customLabels[1].name",
+				},
+			},
+		},
+		"mutually exclusive sources": {
+			cfg: &configapi.Configuration{
+				ControllerManager: configapi.ControllerManager{
+					Metrics: configapi.ControllerMetrics{
+						CustomLabels: []configapi.ControllerMetricsCustomLabel{
+							{Name: "team", SourceLabelKey: "team-label", SourceAnnotationKey: "team-annotation"},
+						},
+					},
+				},
+			},
+			wantErr: field.ErrorList{
+				&field.Error{
+					Type:  field.ErrorTypeInvalid,
+					Field: "metrics.customLabels[0]",
+				},
+			},
+		},
+		"invalid sourceLabelKey": {
+			cfg: &configapi.Configuration{
+				ControllerManager: configapi.ControllerManager{
+					Metrics: configapi.ControllerMetrics{
+						CustomLabels: []configapi.ControllerMetricsCustomLabel{
+							{Name: "team", SourceLabelKey: "invalid key with spaces"},
+						},
+					},
+				},
+			},
+			wantErr: field.ErrorList{
+				&field.Error{
+					Type:  field.ErrorTypeInvalid,
+					Field: "metrics.customLabels[0].sourceLabelKey",
+				},
+			},
+		},
+		"invalid sourceAnnotationKey": {
+			cfg: &configapi.Configuration{
+				ControllerManager: configapi.ControllerManager{
+					Metrics: configapi.ControllerMetrics{
+						CustomLabels: []configapi.ControllerMetricsCustomLabel{
+							{Name: "team", SourceAnnotationKey: "invalid key with spaces"},
+						},
+					},
+				},
+			},
+			wantErr: field.ErrorList{
+				&field.Error{
+					Type:  field.ErrorTypeInvalid,
+					Field: "metrics.customLabels[0].sourceAnnotationKey",
+				},
+			},
+		},
+		"name with underscore valid as k8s label key": {
+			cfg: &configapi.Configuration{
+				ControllerManager: configapi.ControllerManager{
+					Metrics: configapi.ControllerMetrics{
+						CustomLabels: []configapi.ControllerMetricsCustomLabel{
+							{Name: "has_underscore"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			got := validateCustomLabels(tc.cfg)
+			if diff := cmp.Diff(tc.wantErr, got, cmpopts.IgnoreFields(field.Error{}, "BadValue", "Detail")); diff != "" {
+				t.Errorf("validateCustomLabels() returned unexpected error (-want,+got):\n%s", diff)
 			}
 		})
 	}
