@@ -966,11 +966,10 @@ var _ = ginkgo.Describe("ClusterQueue controller", ginkgo.Label("controller:clus
 
 	ginkgo.When("Deleting clusterQueues", func() {
 		var (
-			cq          *kueue.ClusterQueue
-			lq          *kueue.LocalQueue
-			check       *kueue.AdmissionCheck
-			flavor      *kueue.ResourceFlavor
-			cqAdmission *kueue.Admission
+			cq     *kueue.ClusterQueue
+			lq     *kueue.LocalQueue
+			check  *kueue.AdmissionCheck
+			flavor *kueue.ResourceFlavor
 		)
 
 		ginkgo.BeforeEach(func() {
@@ -987,12 +986,6 @@ var _ = ginkgo.Describe("ClusterQueue controller", ginkgo.Label("controller:clus
 			lq = utiltestingapi.MakeLocalQueue("queue", ns.Name).ClusterQueue(cq.Name).Obj()
 			util.MustCreate(ctx, k8sClient, lq)
 			util.MustCreate(ctx, k8sClient, cq)
-
-			podSetAssignment := utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).Flavor(
-				resourceGPU,
-				kueue.ResourceFlavorReference(flavor.Name),
-			).Obj()
-			cqAdmission = utiltestingapi.MakeAdmission(cq.Name).PodSets(podSetAssignment).Obj()
 		})
 
 		ginkgo.AfterEach(func() {
@@ -1015,6 +1008,12 @@ var _ = ginkgo.Describe("ClusterQueue controller", ginkgo.Label("controller:clus
 			wl := utiltestingapi.MakeWorkload("workload", ns.Name).Queue(kueue.LocalQueueName(lq.Name)).Obj()
 			util.MustCreate(ctx, k8sClient, wl)
 			key := client.ObjectKeyFromObject(wl)
+
+			podSetAssignment := utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).Flavor(
+				resourceGPU,
+				kueue.ResourceFlavorReference(flavor.Name),
+			).Obj()
+			cqAdmission := utiltestingapi.MakeAdmission(cq.Name).PodSets(podSetAssignment).Obj()
 			util.SetQuotaReservation(ctx, k8sClient, key, cqAdmission)
 
 			ginkgo.By("Set admission check ready")
@@ -1065,7 +1064,14 @@ var _ = ginkgo.Describe("ClusterQueue controller", ginkgo.Label("controller:clus
 			wl := utiltestingapi.MakeWorkload("workload", ns.Name).Queue(kueue.LocalQueueName(lq.Name)).Obj()
 			util.MustCreate(ctx, k8sClient, wl)
 			key := client.ObjectKeyFromObject(wl)
+
+			podSetAssignment := utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).Flavor(
+				resourceGPU,
+				kueue.ResourceFlavorReference(flavor.Name),
+			).Obj()
+			cqAdmission := utiltestingapi.MakeAdmission(cq.Name).PodSets(podSetAssignment).Obj()
 			util.SetQuotaReservation(ctx, k8sClient, key, cqAdmission)
+
 			util.SetWorkloadsAdmissionCheck(ctx, k8sClient, wl, kueue.AdmissionCheckReference(check.Name), kueue.CheckStateReady, true)
 			gomega.Eventually(func(g gomega.Gomega) {
 				updatedWl := &kueue.Workload{}
