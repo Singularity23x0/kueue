@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -1306,13 +1307,19 @@ func RemoveFinalizer(ctx context.Context, c client.Client, wl *kueue.Workload) e
 
 // AdmissionChecksForWorkload returns AdmissionChecks that should be assigned to a specific Workload based on
 // ClusterQueue configuration
-func AdmissionChecksForWorkload(wl *kueue.Workload, cq *kueue.ClusterQueue) sets.Set[kueue.AdmissionCheckReference] {
+func AdmissionChecksForWorkload(log logr.Logger, wl *kueue.Workload, cq *kueue.ClusterQueue) sets.Set[kueue.AdmissionCheckReference] {
+	log = log.WithValues(
+			"Workload", klog.KObj(wl),
+			"ClusterQueue", klog.KObj(cq),
+		)
 	allChecks := admissioncheck.NewAdmissionChecks(cq)
 
 	// If we have an admission with flavors assigned we can provide all relevant checks right away.
 	if assignedFlavors := admissionFlavors(wl.Status.Admission); len(assignedFlavors) > 0 {
 		return checksForFlavors(allChecks, assignedFlavors)
 	}
+
+	log.V(2).Info("Workload has no Admission.")
 
 	// If unable to determine flavors assigned to a workload we can only list
 	// the checks which apply to all flavors supported by the ClusterQueue.
@@ -1323,6 +1330,16 @@ func AdmissionChecksForWorkload(wl *kueue.Workload, cq *kueue.ClusterQueue) sets
 			checksForAllFlavors.Insert(acName)
 		}
 	}
+
+	if checksForAllFlavors.Len() == 0 {
+		log.V(3).Info("Unable to determine required admission checks.")
+	} else {
+		log.V(3).Info(
+			"Found admission checks required for all workloads in ClusterQueue regrardless of assigned flavors.",
+			"AdmissionChecks", checksForAllFlavors,
+			)
+	}
+
 	return checksForAllFlavors
 }
 

@@ -1133,6 +1133,7 @@ func TestAdmissionCheckListingForWorkload(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
+			_, log := utiltesting.ContextWithLog(t)
 			cq := utiltestingapi.MakeClusterQueue("cq").
 				ResourceGroup(*utiltestingapi.MakeFlavorQuotas("flavor1").Obj(), *utiltestingapi.MakeFlavorQuotas("flavor2").Obj()).
 				AdmissionCheckStrategy(
@@ -1143,7 +1144,7 @@ func TestAdmissionCheckListingForWorkload(t *testing.T) {
 					*utiltestingapi.MakeAdmissionCheckStrategyRule("ac5", "non-existent-flavor").Obj(),
 					*utiltestingapi.MakeAdmissionCheckStrategyRule("ac6").Obj(),
 				).Obj()
-			gotAdmissionChecks := AdmissionChecksForWorkload(tc.wl, cq)
+			gotAdmissionChecks := AdmissionChecksForWorkload(log, tc.wl, cq)
 
 			if diff := cmp.Diff(tc.wantAdmissionChecks, gotAdmissionChecks); diff != "" {
 				t.Errorf("Unexpected AdmissionChecks, (want-/got+):\n%s", diff)
