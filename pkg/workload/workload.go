@@ -1309,9 +1309,11 @@ func RemoveFinalizer(ctx context.Context, c client.Client, wl *kueue.Workload) e
 // ClusterQueue configuration
 func AdmissionChecksForWorkload(log logr.Logger, wl *kueue.Workload, cq *kueue.ClusterQueue) sets.Set[kueue.AdmissionCheckReference] {
 	log = log.WithValues(
-			"Workload", klog.KObj(wl),
-			"ClusterQueue", klog.KObj(cq),
-		)
+		"Workload",
+		klog.KObj(wl),
+		"ClusterQueue",
+		klog.KObj(cq),
+	)
 	allChecks := admissioncheck.NewAdmissionChecks(cq)
 
 	// If we have an admission with flavors assigned we can provide all relevant checks right away.
@@ -1336,8 +1338,9 @@ func AdmissionChecksForWorkload(log logr.Logger, wl *kueue.Workload, cq *kueue.C
 	} else {
 		log.V(3).Info(
 			"Found admission checks required for all workloads in ClusterQueue regrardless of assigned flavors.",
-			"AdmissionChecks", checksForAllFlavors,
-			)
+			"AdmissionChecks",
+			checksForAllFlavors,
+		)
 	}
 
 	return checksForAllFlavors
