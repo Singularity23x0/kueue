@@ -2141,17 +2141,17 @@ func ensurePodWorkloadsRunning(deployment *appsv1.Deployment, managerNs corev1.N
 	for _, pod := range pods.Items { // We want to test that all deployment pods have workloads.
 		createdLeaderWorkload := &kueue.Workload{}
 		wlLookupKey := types.NamespacedName{Name: workloadpod.GetWorkloadNameForPod(pod.Name, pod.UID), Namespace: managerNs.Name}
-		gomega.Expect(k8sManagerClient.Get(ctx, wlLookupKey, createdLeaderWorkload)).To(gomega.Succeed())
+		var admissionCheck *kueue.AdmissionCheckState
+		gomega.Eventually(func(g gomega.Gomega) {
+			gomega.Expect(k8sManagerClient.Get(ctx, wlLookupKey, createdLeaderWorkload)).To(gomega.Succeed())
+			admissionCheck = admissioncheck.FindAdmissionCheck(createdLeaderWorkload.Status.AdmissionChecks, kueue.AdmissionCheckReference(multiKueueAc.Name))
+			gomega.Expect(admissionCheck.State).To(gomega.Equal(kueue.CheckStateReady))
+		}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
 
 		// By checking the assigned cluster we can discern which client to use
-		admissionCheck := admissioncheck.FindAdmissionCheck(createdLeaderWorkload.Status.AdmissionChecks, kueue.AdmissionCheckReference(multiKueueAc.Name))
-		if admissionCheck.State != kueue.CheckStateReady {
-			ginkgo.Fail(fmt.Sprintf("Expected mutlikueue admission check \"%s\" to be in state: %s, but was: %s", multiKueueAc.Name, kueue.CheckStateReady, admissionCheck.State))
-		}
-		admissionCheckMessage := admissionCheck.Message
-		workerClusterName := GetMultiKueueClusterNameFromAdmissionCheckMessage(admissionCheckMessage)
+		workerClusterName := GetMultiKueueClusterNameFromAdmissionCheckMessage(admissionCheck.Message)
 		if workerClusterName == "" {
-			ginkgo.Fail(fmt.Sprintf("Could not find Worker Cluster for admission check message: \"%s\"", admissionCheckMessage))
+			ginkgo.Fail(fmt.Sprintf("Could not find Worker Cluster for multikueue admission check message: \"%s\"", admissionCheck.Message))
 		}
 		workerCluster, ok := kubernetesClients[workerClusterName]
 		if !ok {
