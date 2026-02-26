@@ -1334,10 +1334,10 @@ func AdmissionChecksForWorkload(log logr.Logger, wl *kueue.Workload, cq *kueue.C
 	}
 
 	if checksForAllFlavors.Len() == 0 {
-		log.V(3).Info("Unable to determine required admission checks.")
+		log.V(3).Info("Unable to determine admission checks required by the workload without an Admission.")
 	} else {
 		log.V(3).Info(
-			"Found admission checks required for all workloads in ClusterQueue regrardless of assigned flavors.",
+			"Found admission checks required for all workloads in ClusterQueue regardless of assigned flavors.",
 			"AdmissionChecks",
 			checksForAllFlavors,
 		)
