@@ -2139,10 +2139,11 @@ func ensurePodWorkloadsRunning(deployment *appsv1.Deployment, managerNs corev1.N
 		client.MatchingLabels(deployment.Spec.Selector.MatchLabels))).To(gomega.Succeed())
 
 	for _, pod := range pods.Items { // We want to test that all deployment pods have workloads.
-		createdLeaderWorkload := &kueue.Workload{}
-		wlLookupKey := types.NamespacedName{Name: workloadpod.GetWorkloadNameForPod(pod.Name, pod.UID), Namespace: managerNs.Name}
+		var createdLeaderWorkload *kueue.Workload
 		var admissionCheck *kueue.AdmissionCheckState
+		wlLookupKey := types.NamespacedName{Name: workloadpod.GetWorkloadNameForPod(pod.Name, pod.UID), Namespace: managerNs.Name}
 		gomega.Eventually(func(g gomega.Gomega) {
+			createdLeaderWorkload = &kueue.Workload{}
 			gomega.Expect(k8sManagerClient.Get(ctx, wlLookupKey, createdLeaderWorkload)).To(gomega.Succeed())
 			admissionCheck = admissioncheck.FindAdmissionCheck(createdLeaderWorkload.Status.AdmissionChecks, kueue.AdmissionCheckReference(multiKueueAc.Name))
 			gomega.Expect(admissionCheck.State).To(gomega.Equal(kueue.CheckStateReady))
