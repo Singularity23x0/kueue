@@ -1321,8 +1321,6 @@ func AdmissionChecksForWorkload(log logr.Logger, wl *kueue.Workload, cq *kueue.C
 		return checksForFlavors(allChecks, assignedFlavors)
 	}
 
-	log.V(2).Info("Workload has no Admission.")
-
 	// If unable to determine flavors assigned to a workload we can only list
 	// the checks which apply to all flavors supported by the ClusterQueue.
 	allFlavors := queue.AllFlavors(cq.Spec.ResourceGroups)
@@ -1332,17 +1330,11 @@ func AdmissionChecksForWorkload(log logr.Logger, wl *kueue.Workload, cq *kueue.C
 			checksForAllFlavors.Insert(acName)
 		}
 	}
-
-	if checksForAllFlavors.Len() == 0 {
-		log.V(3).Info("Unable to determine admission checks required by the workload without an Admission.")
-	} else {
-		log.V(3).Info(
-			"Found admission checks required for all workloads in ClusterQueue regardless of assigned flavors.",
-			"AdmissionChecks",
-			checksForAllFlavors,
-		)
-	}
-
+	log.V(3).Info(
+		"Workload has no Admission: assigning only checks that apply to all workloads in the Cluster Queue regardless of flavor",
+		"Assigned AdmissionChecks",
+		checksForAllFlavors,
+	)
 	return checksForAllFlavors
 }
 
