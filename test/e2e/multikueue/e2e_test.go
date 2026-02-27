@@ -1541,6 +1541,95 @@ var _ = ginkgo.Describe("MultiKueue", func() {
 		})
 	})
 
+	ginkgo.When("A multikueue and a non-multikueue admission checks are defined", func() {
+		var (
+			testAc *kueue.AdmissionCheck
+		)
+
+		ginkgo.BeforeEach(func() {
+			testAc = utiltestingapi.MakeAdmissionCheck("test-ac").
+				ControllerName("test-controller").
+				Active(metav1.ConditionTrue).
+				Obj()
+			util.MustCreate(ctx, k8sManagerClient, testAc)
+
+			gomega.Eventually(func(g gomega.Gomega) {
+				updatedManagerCq := kueue.ClusterQueue{}
+				g.Expect(k8sManagerClient.Get(ctx, client.ObjectKeyFromObject(managerCq), &updatedManagerCq))
+				updatedManagerCq.Spec.AdmissionChecksStrategy.AdmissionChecks = append(
+					updatedManagerCq.Spec.AdmissionChecksStrategy.AdmissionChecks,
+					kueue.AdmissionCheckStrategyRule{Name: kueue.AdmissionCheckReference(testAc.Name)},
+				)
+				g.Expect(k8sManagerClient.Update(ctx, &updatedManagerCq)).To(gomega.Succeed())
+				managerCq = &updatedManagerCq
+			}, util.VeryLongTimeout, util.Interval).Should(gomega.Succeed())
+		})
+
+		ginkgo.AfterEach(func() {
+			util.ExpectObjectToBeDeletedWithTimeout(ctx, k8sManagerClient, managerCq, true, util.LongTimeout)
+			util.ExpectObjectToBeDeletedWithTimeout(ctx, k8sManagerClient, testAc, true, util.LongTimeout)
+		})
+
+		ginkgo.It("Manager workload should be admitted and have all-", func() {
+			// Since it requires 2G of memory, this job can only be admitted in worker 2.
+			job := testingjob.MakeJob("job", managerNs.Name).
+				Queue(kueue.LocalQueueName(managerLq.Name)).
+				RequestAndLimit(corev1.ResourceCPU, "1").
+				RequestAndLimit(corev1.ResourceMemory, "2G").
+				TerminationGracePeriod(1).
+				// Give it the time to be observed Active in the live status update step.
+				Image(util.GetAgnHostImage(), util.BehaviorWaitForDeletion).
+				Obj()
+
+			ginkgo.By("Creating the job", func() {
+				util.MustCreate(ctx, k8sManagerClient, job)
+				gomega.Eventually(func(g gomega.Gomega) {
+					createdJob := &batchv1.Job{}
+					g.Expect(k8sManagerClient.Get(ctx, client.ObjectKeyFromObject(job), createdJob)).To(gomega.Succeed())
+					g.Expect(ptr.Deref(createdJob.Spec.ManagedBy, "")).To(gomega.BeEquivalentTo(kueue.MultiKueueControllerName))
+				}, util.Timeout, util.Interval).Should(gomega.Succeed())
+			})
+
+			createdLeaderWorkload := &kueue.Workload{}
+			wlLookupKey := types.NamespacedName{Name: workloadjob.GetWorkloadNameForJob(job.Name, job.UID), Namespace: managerNs.Name}
+
+			// the execution should be given to the worker
+			ginkgo.By("Waiting to be admitted in worker2, and the manager's job unsuspended", func() {
+				gomega.Eventually(func(g gomega.Gomega) {
+					g.Expect(k8sManagerClient.Get(ctx, wlLookupKey, createdLeaderWorkload)).To(gomega.Succeed())
+					g.Expect(admissioncheck.FindAdmissionCheck(createdLeaderWorkload.Status.AdmissionChecks, kueue.AdmissionCheckReference(multiKueueAc.Name))).To(gomega.BeComparableTo(&kueue.AdmissionCheckState{
+						Name:    kueue.AdmissionCheckReference(multiKueueAc.Name),
+						State:   kueue.CheckStateReady,
+						Message: `The workload got reservation on "worker2"`,
+					}, cmpopts.IgnoreFields(kueue.AdmissionCheckState{}, "LastTransitionTime")))
+				}, util.Timeout, util.Interval).Should(gomega.Succeed())
+
+				gomega.Eventually(func(g gomega.Gomega) {
+					createdJob := &batchv1.Job{}
+					g.Expect(k8sManagerClient.Get(ctx, client.ObjectKeyFromObject(job), createdJob)).To(gomega.Succeed())
+					g.Expect(ptr.Deref(createdJob.Spec.Suspend, false)).To(gomega.BeFalse())
+				}, util.Timeout, util.Interval).Should(gomega.Succeed())
+			})
+
+			ginkgo.By("Waiting for the job to get status updates", func() {
+				gomega.Eventually(func(g gomega.Gomega) {
+					createdJob := batchv1.Job{}
+					g.Expect(k8sManagerClient.Get(ctx, client.ObjectKeyFromObject(job), &createdJob)).To(gomega.Succeed())
+					g.Expect(createdJob.Status.StartTime).NotTo(gomega.BeNil())
+					g.Expect(createdJob.Status.Active).To(gomega.Equal(int32(1)))
+					g.Expect(createdJob.Status.CompletionTime).To(gomega.BeNil())
+				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+			})
+
+			ginkgo.By("Checking if manager worklaod is admitted with all admission checks Ready", func() {
+				managerWl := kueue.Workload{}
+				gomega.Expect(k8sManagerClient.Get(ctx, wlLookupKey, &managerWl)).To(gomega.Succeed())
+				gomega.Expect(workload.IsAdmitted(&managerWl)).To(gomega.BeTrue())
+				gomega.Expect(workload.HasAllChecksReady(&managerWl)).To(gomega.BeTrue())
+			})
+		})
+	})
+
 	ginkgo.When("Incremental mode", ginkgo.Ordered, func() {
 		var defaultManagerKueueCfg *kueueconfig.Configuration
 
