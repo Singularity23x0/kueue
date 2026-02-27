@@ -3230,8 +3230,8 @@ func TestAssignFlavors(t *testing.T) {
 					Count: 1,
 				}},
 				Usage: workload.Usage{Quota: resources.FlavorResourceQuantities{
-					{Flavor: "two", Resource: corev1.ResourceCPU}:    3_000,
-					{Flavor: "two", Resource: corev1.ResourceMemory}: 10 * utiltesting.Mi,
+					{Flavor: "two", Resource: corev1.ResourceCPU}:    1_000,
+					{Flavor: "two", Resource: corev1.ResourceMemory}: 0,
 				}},
 			},
 		},
@@ -3910,7 +3910,7 @@ func TestIsPreferred(t *testing.T) {
 				WhenCanPreempt: kueue.TryNextFlavor,
 				Preference:     makePref(kueue.BorrowingOverPreemption),
 			},
-			wantPreferred: true,
+			wantPreferred: false,
 		},
 		"explicit PreemptionOverBorrowing prioritises lower preemption": {
 			a: granularMode{preemptionMode: preempt, borrowingLevel: 1},
@@ -3920,7 +3920,7 @@ func TestIsPreferred(t *testing.T) {
 				WhenCanPreempt: kueue.TryNextFlavor,
 				Preference:     makePref(kueue.PreemptionOverBorrowing),
 			},
-			wantPreferred: false,
+			wantPreferred: true,
 		},
 		"explicit PreemptionOverBorrowing breaks borrowing ties with preemption": {
 			a: granularMode{preemptionMode: preempt, borrowingLevel: 1},
@@ -4333,6 +4333,70 @@ func TestAssignment_TotalRequestsFor(t *testing.T) {
 				resources.FlavorResource{Flavor: "default", Resource: corev1.ResourceMemory}: 2 * 1048576,
 			},
 		},
+		"WorkloadWithMultiplePodSetsOneUnchangedReplacement": {
+			fields: fields{
+				PodSets: []PodSetAssignment{
+					{
+						Name: "worker",
+						Flavors: ResourceAssignment{
+							corev1.ResourceCPU:    {Name: "default", Mode: Fit, TriedFlavorIdx: -1},
+							corev1.ResourceMemory: {Name: "default", Mode: Fit, TriedFlavorIdx: -1},
+						},
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("1"),
+							corev1.ResourceMemory: resource.MustParse("1Mi"),
+						},
+						Count: 2, // Unchanged: was 2, still 2
+					},
+					{
+						Name: "coordinator",
+						Flavors: ResourceAssignment{
+							corev1.ResourceCPU:    {Name: "default", Mode: Fit, TriedFlavorIdx: -1},
+							corev1.ResourceMemory: {Name: "default", Mode: Fit, TriedFlavorIdx: -1},
+						},
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("2"),
+							corev1.ResourceMemory: resource.MustParse("2Mi"),
+						},
+						Count: 3, // Changed: was 1, now 3
+					},
+				},
+				replaceWorkloadSlice: workload.NewInfo(utiltestingapi.MakeWorkload("test", "default").
+					PodSets(
+						*utiltestingapi.MakePodSet("worker", 2).
+							Request(corev1.ResourceCPU, "1").
+							Request(corev1.ResourceMemory, "1Mi").
+							Obj(),
+						*utiltestingapi.MakePodSet("coordinator", 1).
+							Request(corev1.ResourceCPU, "2").
+							Request(corev1.ResourceMemory, "2Mi").
+							Obj(),
+					).
+					Obj()),
+			},
+			args: args{
+				wl: workload.NewInfo(utiltestingapi.MakeWorkload("test", "default").
+					PodSets(
+						*utiltestingapi.MakePodSet("worker", 2).
+							Request(corev1.ResourceCPU, "1").
+							Request(corev1.ResourceMemory, "1Mi").
+							Obj(),
+						*utiltestingapi.MakePodSet("coordinator", 3).
+							Request(corev1.ResourceCPU, "2").
+							Request(corev1.ResourceMemory, "2Mi").
+							Obj(),
+					).
+					Obj()),
+			},
+			want: resources.FlavorResourceQuantities{
+				// worker: (2 - 2) * 1 CPU = 0 (no additional quota needed)
+				// coordinator: (3 - 1) * 2 CPU = 4 (need 2 more pods worth of resources)
+				// Total CPU: 0 + 4000m = 4000m
+				// Total Memory: 0 + 4Mi = 4Mi
+				resources.FlavorResource{Flavor: "default", Resource: corev1.ResourceCPU}:    4 * 1000,
+				resources.FlavorResource{Flavor: "default", Resource: corev1.ResourceMemory}: 4 * 1048576,
+			},
+		},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -4343,6 +4407,34 @@ func TestAssignment_TotalRequestsFor(t *testing.T) {
 			got := a.TotalRequestsFor(tt.args.wl)
 			if diff := cmp.Diff(got, tt.want); diff != "" {
 				t.Errorf("TotalRequestsFor() (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestAssignment_RequiresBorrowing(t *testing.T) {
+	tests := map[string]struct {
+		borrowing int
+		want      bool
+	}{
+		"no borrowing": {
+			borrowing: 0,
+			want:      false,
+		},
+		"borrows at level 1": {
+			borrowing: 1,
+			want:      true,
+		},
+		"borrows at level 2": {
+			borrowing: 2,
+			want:      true,
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			a := &Assignment{Borrowing: tc.borrowing}
+			if got := a.RequiresBorrowing(); got != tc.want {
+				t.Errorf("RequiresBorrowing() = %v, want %v", got, tc.want)
 			}
 		})
 	}

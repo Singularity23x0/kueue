@@ -53,6 +53,13 @@ const (
 	// Enable priority sorting within the cohort.
 	PrioritySortingWithinCohort featuregate.Feature = "PrioritySortingWithinCohort"
 
+	// owner: @mukund-wayve
+	// kep: https://github.com/kubernetes-sigs/kueue/issues/9406
+	//
+	// In fair sharing admission ordering, prefer workloads that fit
+	// within their CQ's nominal quota over workloads that require borrowing.
+	FairSharingPrioritizeNonBorrowing featuregate.Feature = "FairSharingPrioritizeNonBorrowing"
+
 	// owner: @trasc
 	// kep: https://github.com/kubernetes-sigs/kueue/tree/main/keps/693-multikueue
 	//
@@ -88,12 +95,6 @@ const (
 	//
 	// Enable to set default LocalQueue.
 	LocalQueueDefaulting featuregate.Feature = "LocalQueueDefaulting"
-
-	// owner: @pbundyra
-	// kep: https://github.com/kubernetes-sigs/kueue/tree/main/keps/2724-topology-aware-scheduling
-	//
-	// Enable to set use LeastFreeCapacity algorithm for TAS
-	TASProfileLeastFreeCapacity featuregate.Feature = "TASProfileLeastFreeCapacity"
 
 	// owner: @pbundyra
 	// kep: https://github.com/kubernetes-sigs/kueue/tree/main/keps/2724-topology-aware-scheduling
@@ -250,6 +251,18 @@ const (
 	//
 	// Finalizers are removed using a strict patch not to cause race conditions.
 	RemoveFinalizersWithStrictPatch featuregate.Feature = "RemoveFinalizersWithStrictPatch"
+
+	// owner: @j-skiba
+	//
+	// issue: https://github.com/kubernetes-sigs/kueue/issues/8828
+	// Enable workload eviction when node is tainted and pods are not able to run.
+	TASReplaceNodeOnNodeTaints featuregate.Feature = "TASReplaceNodeOnNodeTaints"
+
+	// owner: @dkaluza
+	//
+	// issue: https://github.com/kubernetes-sigs/kueue/issues/9156
+	// Enables pod labeling with corresponding cluster and local queue names
+	AssignQueueLabelsForPods featuregate.Feature = "AssignQueueLabelsForPods"
 )
 
 func init() {
@@ -277,6 +290,9 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 	PrioritySortingWithinCohort: {
 		{Version: version.MustParse("0.6"), Default: true, PreRelease: featuregate.Beta},
 	},
+	FairSharingPrioritizeNonBorrowing: {
+		{Version: version.MustParse("0.17"), Default: true, PreRelease: featuregate.Beta},
+	},
 	MultiKueue: {
 		{Version: version.MustParse("0.6"), Default: false, PreRelease: featuregate.Alpha},
 		{Version: version.MustParse("0.9"), Default: true, PreRelease: featuregate.Beta},
@@ -302,10 +318,6 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 		{Version: version.MustParse("0.10"), Default: false, PreRelease: featuregate.Alpha},
 		{Version: version.MustParse("0.12"), Default: true, PreRelease: featuregate.Beta},
 		{Version: version.MustParse("0.17"), Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 0.19
-	},
-	TASProfileLeastFreeCapacity: {
-		{Version: version.MustParse("0.10"), Default: false, PreRelease: featuregate.Alpha},
-		{Version: version.MustParse("0.11"), Default: false, PreRelease: featuregate.Deprecated},
 	},
 	TASProfileMixed: {
 		{Version: version.MustParse("0.10"), Default: false, PreRelease: featuregate.Alpha},
@@ -393,6 +405,12 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 		{Version: version.MustParse("0.16"), Default: true, PreRelease: featuregate.Beta}, // GA in 0.18
 	},
 	RemoveFinalizersWithStrictPatch: {
+		{Version: version.MustParse("0.17"), Default: true, PreRelease: featuregate.Beta},
+	},
+	TASReplaceNodeOnNodeTaints: {
+		{Version: version.MustParse("0.17"), Default: true, PreRelease: featuregate.Beta},
+	},
+	AssignQueueLabelsForPods: {
 		{Version: version.MustParse("0.17"), Default: true, PreRelease: featuregate.Beta},
 	},
 }

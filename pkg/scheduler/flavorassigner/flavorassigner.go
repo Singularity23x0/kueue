@@ -53,7 +53,9 @@ type Assignment struct {
 	LastState workload.AssignmentClusterQueueState
 
 	// Usage is the accumulated Usage of resources as pod sets get
-	// flavors assigned.
+	// flavors assigned. When workload slicing is enabled and replaceWorkloadSlice
+	// is set, this represents only the delta usage (new - old) to avoid double-counting
+	// resources already reserved in the replaced slice.
 	Usage workload.Usage
 
 	// representativeMode is the cached representative mode for this assignment.
@@ -109,9 +111,16 @@ func (a *Assignment) ComputeTASNetUsage(prevAdmission *kueue.Admission) workload
 	return result
 }
 
-// Borrows return whether assignment requires borrowing.
+// Borrows returns the borrowing level of the assignment.
+// It equals 0 if no borrowing is required.
 func (a *Assignment) Borrows() int {
 	return a.Borrowing
+}
+
+// RequiresBorrowing returns whether the assignment requires borrowing
+// at any level.
+func (a *Assignment) RequiresBorrowing() bool {
+	return a.Borrowing > 0
 }
 
 func (a *Assignment) podSetAssignmentByName(psName kueue.PodSetReference) *PodSetAssignment {
@@ -410,9 +419,9 @@ func isPreferred(a, b granularMode, fungibilityConfig kueue.FlavorFungibility) b
 	if fungibilityConfig.Preference != nil {
 		switch *fungibilityConfig.Preference {
 		case kueue.BorrowingOverPreemption:
-			return preemptionOverBorrowing()
-		case kueue.PreemptionOverBorrowing:
 			return borrowingOverPreemption()
+		case kueue.PreemptionOverBorrowing:
+			return preemptionOverBorrowing()
 		}
 	}
 
@@ -701,10 +710,35 @@ func (a *Assignment) append(requests resources.Requests, psAssignment *PodSetAss
 			a.Borrowing = flvAssignment.borrow
 		}
 		fr := resources.FlavorResource{Flavor: flvAssignment.Name, Resource: resource}
-		a.Usage.Quota[fr] += requests[resource]
+
+		// For workload slicing, only add the delta (new - old) to avoid double-counting
+		// podSets that already have quota reserved in the old slice.
+		requestAmount := requests[resource]
+		if features.Enabled(features.ElasticJobsViaWorkloadSlices) && a.replaceWorkloadSlice != nil {
+			oldRequest := a.findOldPodSetRequest(psAssignment.Name, resource)
+			requestAmount -= oldRequest
+		}
+
+		a.Usage.Quota[fr] += requestAmount
 		flavorIdx[resource] = flvAssignment.TriedFlavorIdx
 	}
 	a.LastState.LastTriedFlavorIdx = append(a.LastState.LastTriedFlavorIdx, flavorIdx)
+}
+
+// findOldPodSetRequest returns the resource request from the old workload slice
+// for the given podSet name and resource. Returns 0 if not found.
+func (a *Assignment) findOldPodSetRequest(psName kueue.PodSetReference, resource corev1.ResourceName) int64 {
+	if a.replaceWorkloadSlice == nil {
+		return 0
+	}
+
+	for _, oldPS := range a.replaceWorkloadSlice.TotalRequests {
+		if oldPS.Name == psName {
+			return oldPS.Requests[resource]
+		}
+	}
+
+	return 0
 }
 
 // findFlavorForPodSets finds the flavor which can satisfy all the PodSet requests
@@ -749,15 +783,11 @@ func (a *FlavorAssigner) findFlavorForPodSets(
 		attemptedFlavorIdx = idx
 		fName := resourceGroup.Flavors[idx]
 
-		flavorStatus := NewStatus()
-
-		if fit, err := a.checkFlavorForPodSets(log, fName, psIDs, podSets, selectors, flavorStatus); !fit {
-			if flavorStatus != nil {
-				status.reasons = append(status.reasons, flavorStatus.reasons...)
-			}
+		if flavorStatus := a.checkFlavorForPodSets(log, fName, psIDs, podSets, selectors); !flavorStatus.IsFit() {
+			status.reasons = append(status.reasons, flavorStatus.reasons...)
 			consideredFlavors.AddNoFitFlavorAttempt(fName, flavorStatus)
-			if err != nil {
-				status.err = err
+			if flavorStatus.err != nil {
+				status.err = flavorStatus.err
 				return nil, status, consideredFlavors
 			}
 			continue
@@ -860,13 +890,14 @@ func (a *FlavorAssigner) checkFlavorForPodSets(
 	psIDs []int,
 	podSets []*kueue.PodSet,
 	selectors []nodeaffinity.RequiredNodeAffinity,
-	status *Status,
-) (bool, error) {
+) *Status {
+	status := NewStatus()
+
 	flavor, exist := a.resourceFlavors[flavorName]
 	if !exist {
 		log.Error(nil, "Flavor not found", "Flavor", flavorName)
 		status.appendf("flavor %s not found", flavorName)
-		return false, nil
+		return status
 	}
 
 	for psIdx, psID := range psIDs {
@@ -875,7 +906,7 @@ func (a *FlavorAssigner) checkFlavorForPodSets(
 			if message := checkPodSetAndFlavorMatchForTAS(a.cq, ps, flavor); message != nil {
 				log.Error(nil, *message)
 				status.appendf("%s", *message)
-				return false, nil
+				return status
 			}
 		}
 		podSpec := podSets[psIdx].Template.Spec
@@ -884,19 +915,19 @@ func (a *FlavorAssigner) checkFlavorForPodSets(
 		}, true)
 		if untolerated {
 			status.appendf("untolerated taint %s in flavor %s", taint, flavorName)
-			return false, nil
+			return status
 		}
 		selector := selectors[psIdx]
 		if match, err := selector.Match(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Labels: flavor.Spec.NodeLabels}}); !match || err != nil {
 			if err != nil {
 				status.err = err
-				return false, err
+				return status
 			}
 			status.appendf("flavor %s doesn't match node affinity", flavorName)
-			return false, nil
+			return status
 		}
 	}
-	return true, nil
+	return status
 }
 
 func shouldTryNextFlavor(representativeMode granularMode, flavorFungibility kueue.FlavorFungibility) bool {
