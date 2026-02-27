@@ -264,8 +264,16 @@ var _ = ginkgo.Describe("Workload controller", ginkgo.Label("controller:workload
 				ResourceGroup(*utiltestingapi.MakeFlavorQuotas(flavorOnDemand).Resource(resourceGPU, "5", "5").Obj()).
 				ResourceGroup(*utiltestingapi.MakeFlavorQuotas(flavorSpot).Resource(corev1.ResourceMemory, "5", "5").Obj()).
 				Cohort("cohort").
-				AdmissionChecks("check1", "check2").
-				WithAdmissionCheck("check3", kueue.ResourceFlavorReference(flavor2.Name)).
+				AdmissionCheckStrategy(
+					kueue.AdmissionCheckStrategyRule{Name: "check1"},
+					kueue.AdmissionCheckStrategyRule{Name: "check2"},
+					kueue.AdmissionCheckStrategyRule{
+						Name: "check3",
+						OnFlavors: []kueue.ResourceFlavorReference{
+							kueue.ResourceFlavorReference(flavor2.Name),
+						},
+					},
+				).
 				Obj()
 			util.MustCreate(ctx, k8sClient, clusterQueue)
 			localQueue = utiltestingapi.MakeLocalQueue("queue", ns.Name).ClusterQueue(clusterQueue.Name).Obj()
