@@ -44,6 +44,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/resources"
 	"sigs.k8s.io/kueue/pkg/util/admissioncheck"
+	"sigs.k8s.io/kueue/pkg/util/queue"
 	utiltas "sigs.k8s.io/kueue/pkg/util/tas"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
@@ -1075,12 +1076,13 @@ func TestFlavorResourceUsage(t *testing.T) {
 	}
 }
 
-func TestFilterChecksForAdmission(t *testing.T) {
+func TestChecksForFlavor(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	cases := map[string]struct {
 		cq                  *kueue.ClusterQueue
 		wl                  *kueue.Workload
 		wantAdmissionChecks sets.Set[kueue.AdmissionCheckReference]
+		wantGlobalCqChecks  sets.Set[kueue.AdmissionCheckReference]
 	}{
 		"AdmissionCheckStrategy with a flavor": {
 			wl: utiltestingapi.MakeWorkload("wl", "ns").
@@ -1095,6 +1097,7 @@ func TestFilterChecksForAdmission(t *testing.T) {
 				AdmissionCheckStrategy(*utiltestingapi.MakeAdmissionCheckStrategyRule("ac1", "flavor1").Obj()).
 				Obj(),
 			wantAdmissionChecks: sets.New[kueue.AdmissionCheckReference]("ac1"),
+			wantGlobalCqChecks:  nil,
 		},
 		"AdmissionCheckStrategy with an unmatched flavor": {
 			wl: utiltestingapi.MakeWorkload("wl", "ns").
@@ -1109,6 +1112,7 @@ func TestFilterChecksForAdmission(t *testing.T) {
 				AdmissionCheckStrategy(*utiltestingapi.MakeAdmissionCheckStrategyRule("ac1", "unmatched-flavor").Obj()).
 				Obj(),
 			wantAdmissionChecks: nil,
+			wantGlobalCqChecks:  nil,
 		},
 		"AdmissionCheckStrategy without a flavor": {
 			wl: utiltestingapi.MakeWorkload("wl", "ns").
@@ -1123,6 +1127,7 @@ func TestFilterChecksForAdmission(t *testing.T) {
 				AdmissionCheckStrategy(*utiltestingapi.MakeAdmissionCheckStrategyRule("ac1").Obj()).
 				Obj(),
 			wantAdmissionChecks: sets.New[kueue.AdmissionCheckReference]("ac1"),
+			wantGlobalCqChecks:  sets.New[kueue.AdmissionCheckReference]("ac1"),
 		},
 		"Two AdmissionCheckStrategies, one with flavor, one without flavor": {
 			wl: utiltestingapi.MakeWorkload("wl", "ns").
@@ -1139,6 +1144,7 @@ func TestFilterChecksForAdmission(t *testing.T) {
 					*utiltestingapi.MakeAdmissionCheckStrategyRule("ac2").Obj()).
 				Obj(),
 			wantAdmissionChecks: sets.New[kueue.AdmissionCheckReference]("ac1", "ac2"),
+			wantGlobalCqChecks:  sets.New[kueue.AdmissionCheckReference]("ac2"),
 		},
 		"AdmissionCheckStrategy with only a non-existent flavor": {
 			wl: utiltestingapi.MakeWorkload("wl", "ns").
@@ -1169,6 +1175,7 @@ func TestFilterChecksForAdmission(t *testing.T) {
 					*utiltestingapi.MakeAdmissionCheckStrategyRule("ac1", "flavor1", "flavor-nonexistent").Obj()).
 				Obj(),
 			wantAdmissionChecks: sets.New[kueue.AdmissionCheckReference]("ac1"),
+			wantGlobalCqChecks:  sets.New[kueue.AdmissionCheckReference]("ac1"),
 		},
 		"Two AdmissionCheckStrategies, one covering one flavor, one covering another": {
 			wl: utiltestingapi.MakeWorkload("wl", "ns").
@@ -1184,16 +1191,23 @@ func TestFilterChecksForAdmission(t *testing.T) {
 				AdmissionCheckStrategy(
 					*utiltestingapi.MakeAdmissionCheckStrategyRule("ac1", "flavor1").Obj(),
 					*utiltestingapi.MakeAdmissionCheckStrategyRule("ac2", "flavor2").Obj(),
+					*utiltestingapi.MakeAdmissionCheckStrategyRule("ac3", "flavor1", "flavor2").Obj(),
 				).
 				Obj(),
-			wantAdmissionChecks: sets.New[kueue.AdmissionCheckReference]("ac1", "ac2"),
+			wantAdmissionChecks: sets.New[kueue.AdmissionCheckReference]("ac1", "ac2", "ac3"),
+			wantGlobalCqChecks:  sets.New[kueue.AdmissionCheckReference]("ac3"),
 		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			gotAdmissionChecks := filterChecksForFlavors(admissioncheck.NewAdmissionChecks(tc.cq), admissionFlavors(tc.wl.Status.Admission))
-			if diff := cmp.Diff(tc.wantAdmissionChecks, gotAdmissionChecks); diff != "" {
-				t.Errorf("Unexpected AdmissionChecks, (want-/got+):\n%s", diff)
+			admissionChecks := ChecksForAnyFlavor(admissioncheck.NewAdmissionChecks(tc.cq), AdmissionFlavors(tc.wl.Status.Admission))
+			if diff := cmp.Diff(tc.wantAdmissionChecks, admissionChecks); diff != "" {
+				t.Errorf("Unexpected AdmissionChecks for admission, (want-/got+):\n%s", diff)
+			}
+
+			globalCqChecks := ChecksForAllFlavors(admissioncheck.NewAdmissionChecks(tc.cq), queue.AllFlavors(tc.cq.Spec.ResourceGroups))
+			if diff := cmp.Diff(tc.wantGlobalCqChecks, globalCqChecks); diff != "" {
+				t.Errorf("Unexpected AdmissionChecks applicable to all cq flavors, (want-/got+):\n%s", diff)
 			}
 		})
 	}
