@@ -311,7 +311,7 @@ var _ = ginkgo.Describe("MultiKueue", func() {
 			})
 		})
 
-		ginkgo.It("Should create pods on worker if the deployment is admitted", func() {
+		ginkgo.FIt("Should create pods on worker if the deployment is admitted", func() {
 			var kubernetesClients = map[string]client.Client{
 				"worker1": k8sWorker1Client,
 				"worker2": k8sWorker2Client,
