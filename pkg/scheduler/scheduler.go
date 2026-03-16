@@ -31,7 +31,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -685,7 +684,7 @@ func (s *Scheduler) admit(ctx context.Context, e *entry, cq *schdcache.ClusterQu
 	newWorkload := e.Obj.DeepCopy()
 	s.admissionRoutineWrapper.Run(func() {
 		err := workload.PatchAdmissionStatus(ctx, s.client, newWorkload, s.clock, func(wl *kueue.Workload) (bool, error) {
-			s.prepareWorkload(log, wl, cq, admission)
+			s.prepareWorkload(wl, cq, admission)
 			if features.Enabled(features.TopologyAwareScheduling) && workload.HasUnhealthyNodes(e.Obj) {
 				log.V(5).Info("Clearing the topology assignment recovery field from the workload status after successful recovery")
 				wl.Status.UnhealthyNodes = nil
@@ -717,29 +716,9 @@ func (s *Scheduler) admit(ctx context.Context, e *entry, cq *schdcache.ClusterQu
 	return nil
 }
 
-func (s *Scheduler) prepareWorkload(log logr.Logger, wl *kueue.Workload, cq *schdcache.ClusterQueueSnapshot, admission *kueue.Admission) {
+func (s *Scheduler) prepareWorkload(wl *kueue.Workload, cq *schdcache.ClusterQueueSnapshot, admission *kueue.Admission) {
 	workload.SetQuotaReservation(wl, admission, s.clock)
-
-	var mustHaveChecks sets.Set[kueue.AdmissionCheckReference]
-	// We expect the method to return a non-nil set sicne the admission should never be a null here.
-	if admissionFlavors := workload.AdmissionFlavors(wl.Status.Admission); admissionFlavors.Len() > 0 {
-		// When flavors are assigned, wl must have all checks applicaple to any of its flavors
-		mustHaveChecks = workload.ChecksForAnyFlavor(cq.AdmissionChecks, admissionFlavors)
-	} else {
-		// When wl has no flavors we consider only the checks that cover all possible flavors
-		// This should never happen beyond tests
-		allFlavors := schdcache.AllFlavors(cq.ResourceGroups)
-		mustHaveChecks = workload.ChecksForAllFlavors(cq.AdmissionChecks, allFlavors)
-		log.V(3).Info(
-			"Workload was admitted with no flavors. Only AdmissionChecks that cover all possible ClusterQueue flavors will be required of this Workload.",
-			"Workload", client.ObjectKeyFromObject(wl),
-			"ClusterQueue", cq.Name,
-			"Required AdmissionChecks", mustHaveChecks,
-			"Ignored AdmissionChecks", sets.KeySet(cq.AdmissionChecks).Difference(mustHaveChecks),
-		)
-	}
-
-	if workload.HasAllRequiredChecks(wl, mustHaveChecks) {
+	if workload.HasAllRequiredChecks(wl, cq.AdmissionChecks) {
 		// sync Admitted, ignore the result since an API update is always done.
 		_ = workload.SyncAdmittedCondition(wl, s.clock.Now())
 	}
@@ -747,7 +726,7 @@ func (s *Scheduler) prepareWorkload(log logr.Logger, wl *kueue.Workload, cq *sch
 
 func (s *Scheduler) assumeWorkload(log logr.Logger, e *entry, cq *schdcache.ClusterQueueSnapshot, admission *kueue.Admission) (*kueue.Workload, error) {
 	cacheWl := e.Obj.DeepCopy()
-	s.prepareWorkload(log, cacheWl, cq, admission)
+	s.prepareWorkload(cacheWl, cq, admission)
 	if added := s.cache.AddOrUpdateWorkload(log, cacheWl); !added {
 		return nil, fmt.Errorf("workload %s/%s could not be added to the cache", cacheWl.Namespace, cacheWl.Name)
 	}
