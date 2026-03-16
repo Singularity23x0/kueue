@@ -1572,7 +1572,7 @@ func Finish(ctx context.Context, c client.Client, wl *kueue.Workload, reason, ms
 	metrics.IncrementFinishedWorkloadTotal(cqName, priorityClassName, cl.CQGet(cqName), tracker)
 	if features.Enabled(features.LocalQueueMetrics) {
 		lqRef := metrics.LQRefFromWorkload(wl)
-		metrics.IncrementLocalQueueFinishedWorkloadTotal(lqRef, priorityClassName, cl.LQGet(utilqueue.KeyFromWorkload(wl)), tracker)
+		metrics.IncrementLocalQueueFinishedWorkloadTotal(lqRef, priorityClassName, cl.LQGet(queue.KeyFromWorkload(wl)), tracker)
 	}
 	return nil
 }
@@ -1630,7 +1630,7 @@ func reportEvictedWorkload(recorder record.EventRecorder, wl *kueue.Workload, cq
 			reason,
 			string(underlyingCause),
 			priorityClassName,
-			cl.LQGet(utilqueue.KeyFromWorkload(wl)),
+			cl.LQGet(queue.KeyFromWorkload(wl)),
 			tracker,
 		)
 	}
