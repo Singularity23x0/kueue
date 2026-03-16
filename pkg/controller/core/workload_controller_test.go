@@ -2970,7 +2970,7 @@ func TestReconcileSyncAdmissionChecks(t *testing.T) {
 				},
 			},
 		},
-		"add checks to unadmitterd wl from cq with strategy": {
+		"add only checks covering all flavors to unadmitterd wl from cq with strategy": {
 			wl: *utiltestingapi.MakeWorkload("wl", "ns").Obj(),
 			cq: *utiltestingapi.MakeClusterQueue("cq").
 				ResourceGroup(
@@ -2981,6 +2981,30 @@ func TestReconcileSyncAdmissionChecks(t *testing.T) {
 				*utiltestingapi.MakeAdmissionCheckStrategyRule("ac2").Obj(),
 			).Obj(),
 			wantChecks: []kueue.AdmissionCheckState{
+				{
+					Name:  "ac2",
+					State: kueue.CheckStatePending,
+				},
+			},
+		},
+		"add all cq checks to wl with empty assignemnt": {
+			wl: *utiltestingapi.MakeWorkload("wl", "ns").Admission(&kueue.Admission{
+				ClusterQueue:      "cq",
+				PodSetAssignments: []kueue.PodSetAssignment{},
+			}).Obj(), // todo admitted.Obj(),
+			cq: *utiltestingapi.MakeClusterQueue("cq").
+				ResourceGroup(
+					*utiltestingapi.MakeFlavorQuotas("flavor1").Obj(),
+					*utiltestingapi.MakeFlavorQuotas("flavor2").Obj(),
+				).AdmissionCheckStrategy(
+				*utiltestingapi.MakeAdmissionCheckStrategyRule("ac1", "flavor1").Obj(),
+				*utiltestingapi.MakeAdmissionCheckStrategyRule("ac2").Obj(),
+			).Obj(),
+			wantChecks: []kueue.AdmissionCheckState{
+				{
+					Name:  "ac1",
+					State: kueue.CheckStatePending,
+				},
 				{
 					Name:  "ac2",
 					State: kueue.CheckStatePending,
