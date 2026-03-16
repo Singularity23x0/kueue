@@ -405,7 +405,6 @@ var _ = ginkgo.Describe("Workload controller", ginkgo.Label("controller:workload
 
 		ginkgo.It("should evict then finish with failure an admitted workload when a check is rejected", func() {
 			wl := utiltestingapi.MakeWorkload("wl", ns.Name).
-				RequestAndLimit(corev1.ResourceCPU, "1").
 				Queue("queue").
 				Obj()
 			wlKey := client.ObjectKeyFromObject(wl)
@@ -422,7 +421,18 @@ var _ = ginkgo.Describe("Workload controller", ginkgo.Label("controller:workload
 			})
 
 			ginkgo.By("setting quota reservation and the checks ready, should admit the workload", func() {
-				util.SetQuotaReservation(ctx, k8sClient, wlKey, utiltestingapi.MakeAdmission(clusterQueue.Name).Obj())
+				podSets := kueue.PodSetAssignment{
+					Name: kueue.DefaultPodSetName,
+					Flavors: map[corev1.ResourceName]kueue.ResourceFlavorReference{
+						corev1.ResourceCPU: kueue.ResourceFlavorReference(flavor1.Name),
+					},
+				}
+				util.SetQuotaReservation(
+					ctx,
+					k8sClient,
+					wlKey,
+					utiltestingapi.MakeAdmission(clusterQueue.Name).PodSets(podSets).Obj(),
+				)
 
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.Get(ctx, wlKey, &createdWl)).To(gomega.Succeed())
