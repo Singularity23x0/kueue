@@ -161,12 +161,15 @@ func HasAllChecksReady(wl *kueue.Workload) bool {
 // HasAllRequiredChecks returns true if all the relevant checks are present in the workload.
 // (They don't have to be in the Ready state; for that, see HasAllChecksReady).
 func HasAllRequiredChecks(wl *kueue.Workload, allChecks map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceFlavorReference]) bool {
-	admissionFlavors := admissionFlavors(wl.Status.Admission)
-	if admissionFlavors.Len() == 0 {
-		return true
+	var mustHaveChecks sets.Set[kueue.AdmissionCheckReference]
+	// Admission should always be present, therefore admissionFlavors cannot be nil
+	if admissionFlavors := admissionFlavors(wl.Status.Admission); admissionFlavors.Len() > 0 {
+		mustHaveChecks = filterChecksForFlavors(allChecks, admissionFlavors)
+	} else {
+		// When the admission has no flavors assigned: expecting all of the ClusterQueue's checks
+		mustHaveChecks = sets.KeySet(allChecks)
 	}
 
-	mustHaveChecks := filterChecksForFlavors(allChecks, admissionFlavors)
 	if mustHaveChecks.Len() == 0 {
 		return true
 	}

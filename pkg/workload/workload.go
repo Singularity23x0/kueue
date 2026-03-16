@@ -1425,10 +1425,17 @@ func AdmissionChecksForWorkload(log logr.Logger, wl *kueue.Workload, cq *kueue.C
 	// with all flavors in the CQ when initially processed by Kueue.
 	if admissionFlavors := admissionFlavors(wl.Status.Admission); len(admissionFlavors) > 0 {
 		return filterChecksForFlavors(allChecks, admissionFlavors)
+	} else if cq.Spec.ResourceGroups != nil {
+		log.V(3).Info(
+			"Workload Admission has no Flavors: applying all defined AdmissionChecks.",
+			"All AdmissionChecks",
+			allChecks,
+		)
+		return sets.KeySet(allChecks)
 	}
 
-	// If unable to determine flavors assigned to a workload we can only list
-	// the checks which apply to all flavors supported by the ClusterQueue.
+	// If no admission is present yet we can only list
+	// the checks which apply to all flavors supported by the ClusterQueue
 	allFlavors := queue.AllFlavors(cq.Spec.ResourceGroups)
 	checksForAllFlavors := filterChecks(allChecks, func(acFlavors flavorSet) bool {
 		return allFlavors.Difference(acFlavors).Len() == 0
