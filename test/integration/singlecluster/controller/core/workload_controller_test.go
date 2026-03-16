@@ -404,7 +404,10 @@ var _ = ginkgo.Describe("Workload controller", ginkgo.Label("controller:workload
 		})
 
 		ginkgo.It("should evict then finish with failure an admitted workload when a check is rejected", func() {
-			wl := utiltestingapi.MakeWorkload("wl", ns.Name).Queue("queue").Obj()
+			wl := utiltestingapi.MakeWorkload("wl", ns.Name).
+				RequestAndLimit(corev1.ResourceCPU, "1").
+				Queue("queue").
+				Obj()
 			wlKey := client.ObjectKeyFromObject(wl)
 			createdWl := kueue.Workload{}
 			ginkgo.By("creating the workload, the check conditions should be added", func() {
