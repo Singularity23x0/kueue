@@ -1417,21 +1417,14 @@ func AdmissionChecksForWorkload(log logr.Logger, wl *kueue.Workload, cq *kueue.C
 	)
 	allChecks := admissioncheck.NewAdmissionChecks(cq)
 
-	// If we have an admission we can provide all relevant checks right away.
-	// Checks that are defined with an empty list of flavors are coinsidered
-	// to apply to all flavors declared for the ClusterQueue.
-	// These checks are considered valid by this logic, as intended,
-	// because checks with empty OnFlavor lists have their lists populated
-	// with all flavors in the CQ when initially processed by Kueue.
-	if admissionFlavors := admissionFlavors(wl.Status.Admission); len(admissionFlavors) > 0 {
-		return filterChecksForFlavors(allChecks, admissionFlavors)
-	} else if cq.Spec.ResourceGroups != nil {
-		log.V(3).Info(
-			"Workload Admission has no Flavors: applying all defined AdmissionChecks.",
-			"All AdmissionChecks",
-			allChecks,
-		)
-		return sets.KeySet(allChecks)
+	if wl.Status.Admission != nil {
+		// If we have an admission we can provide all relevant checks right away.
+		// Checks that are defined with an empty list of flavors are coinsidered
+		// to apply to all flavors declared for the ClusterQueue.
+		// These checks are considered valid by this logic, as intended,
+		// because checks with empty OnFlavor lists have their lists populated
+		// with all flavors in the CQ when initially processed by Kueue.
+		return admissionChecksForAdmission(log, allChecks, *wl.Status.Admission)
 	}
 
 	// If no admission is present yet we can only list
@@ -1448,11 +1441,20 @@ func AdmissionChecksForWorkload(log logr.Logger, wl *kueue.Workload, cq *kueue.C
 	return checksForAllFlavors
 }
 
-// filterChecksForFlavors return all checks which cover at least one of the provided flavors
-func filterChecksForFlavors(allChecks map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceFlavorReference], flavors flavorSet) sets.Set[kueue.AdmissionCheckReference] {
-	return filterChecks(allChecks, func(acFlavors flavorSet) bool {
-		return flavors.Intersection(acFlavors).Len() > 0
-	})
+func admissionChecksForAdmission(log logr.Logger, acs map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceFlavorReference], admission kueue.Admission) sets.Set[kueue.AdmissionCheckReference] {
+	admissionFlavors := admissionFlavors(admission)
+	if len(admissionFlavors) > 0 {
+		return filterChecks(acs, func(acFlavors flavorSet) bool {
+			return admissionFlavors.Intersection(acFlavors).Len() > 0
+		})
+	}
+
+	log.V(3).Info(
+		"Admission has no Flavors; assigning all checks",
+		"AdmissionChecks",
+		acs,
+	)
+	return sets.KeySet(acs)
 }
 
 func filterChecks(acs map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceFlavorReference], fsPredicate func(flavorSet) bool) sets.Set[kueue.AdmissionCheckReference] {
@@ -1465,10 +1467,7 @@ func filterChecks(acs map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceF
 	return acNames
 }
 
-func admissionFlavors(admission *kueue.Admission) sets.Set[kueue.ResourceFlavorReference] {
-	if admission == nil {
-		return nil
-	}
+func admissionFlavors(admission kueue.Admission) sets.Set[kueue.ResourceFlavorReference] {
 	assignedFlavors := sets.New[kueue.ResourceFlavorReference]()
 	for _, podSet := range admission.PodSetAssignments {
 		for _, flavor := range podSet.Flavors {

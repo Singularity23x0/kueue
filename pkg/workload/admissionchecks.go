@@ -19,6 +19,7 @@ package workload
 import (
 	"time"
 
+	"github.com/go-logr/logr"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -160,15 +161,8 @@ func HasAllChecksReady(wl *kueue.Workload) bool {
 
 // HasAllRequiredChecks returns true if all the relevant checks are present in the workload.
 // (They don't have to be in the Ready state; for that, see HasAllChecksReady).
-func HasAllRequiredChecks(wl *kueue.Workload, allChecks map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceFlavorReference]) bool {
-	var mustHaveChecks sets.Set[kueue.AdmissionCheckReference]
-	// Admission should always be present, therefore admissionFlavors cannot be nil
-	if admissionFlavors := admissionFlavors(wl.Status.Admission); admissionFlavors.Len() > 0 {
-		mustHaveChecks = filterChecksForFlavors(allChecks, admissionFlavors)
-	} else {
-		// When the admission has no flavors assigned: expecting all of the ClusterQueue's checks
-		mustHaveChecks = sets.KeySet(allChecks)
-	}
+func HasAllRequiredChecks(log logr.Logger, wl *kueue.Workload, allChecks map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceFlavorReference]) bool {
+	mustHaveChecks := admissionChecksForAdmission(log, allChecks, *wl.Status.Admission)
 
 	if mustHaveChecks.Len() == 0 {
 		return true

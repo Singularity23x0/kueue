@@ -684,7 +684,7 @@ func (s *Scheduler) admit(ctx context.Context, e *entry, cq *schdcache.ClusterQu
 	newWorkload := e.Obj.DeepCopy()
 	s.admissionRoutineWrapper.Run(func() {
 		err := workload.PatchAdmissionStatus(ctx, s.client, newWorkload, s.clock, func(wl *kueue.Workload) (bool, error) {
-			s.prepareWorkload(wl, cq, admission)
+			s.prepareWorkload(log, wl, cq, admission)
 			if features.Enabled(features.TopologyAwareScheduling) && workload.HasUnhealthyNodes(e.Obj) {
 				log.V(5).Info("Clearing the topology assignment recovery field from the workload status after successful recovery")
 				wl.Status.UnhealthyNodes = nil
@@ -716,9 +716,9 @@ func (s *Scheduler) admit(ctx context.Context, e *entry, cq *schdcache.ClusterQu
 	return nil
 }
 
-func (s *Scheduler) prepareWorkload(wl *kueue.Workload, cq *schdcache.ClusterQueueSnapshot, admission *kueue.Admission) {
+func (s *Scheduler) prepareWorkload(log logr.Logger, wl *kueue.Workload, cq *schdcache.ClusterQueueSnapshot, admission *kueue.Admission) {
 	workload.SetQuotaReservation(wl, admission, s.clock)
-	if workload.HasAllRequiredChecks(wl, cq.AdmissionChecks) {
+	if workload.HasAllRequiredChecks(log, wl, cq.AdmissionChecks) {
 		// sync Admitted, ignore the result since an API update is always done.
 		_ = workload.SyncAdmittedCondition(wl, s.clock.Now())
 	}
@@ -726,7 +726,7 @@ func (s *Scheduler) prepareWorkload(wl *kueue.Workload, cq *schdcache.ClusterQue
 
 func (s *Scheduler) assumeWorkload(log logr.Logger, e *entry, cq *schdcache.ClusterQueueSnapshot, admission *kueue.Admission) (*kueue.Workload, error) {
 	cacheWl := e.Obj.DeepCopy()
-	s.prepareWorkload(cacheWl, cq, admission)
+	s.prepareWorkload(log, cacheWl, cq, admission)
 	if added := s.cache.AddOrUpdateWorkload(log, cacheWl); !added {
 		return nil, fmt.Errorf("workload %s/%s could not be added to the cache", cacheWl.Namespace, cacheWl.Name)
 	}

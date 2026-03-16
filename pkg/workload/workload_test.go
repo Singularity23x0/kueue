@@ -1191,7 +1191,8 @@ func TestFilterChecksForAdmission(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			gotAdmissionChecks := filterChecksForFlavors(admissioncheck.NewAdmissionChecks(tc.cq), admissionFlavors(tc.wl.Status.Admission))
+			_, log := utiltesting.ContextWithLog(t)
+			gotAdmissionChecks := admissionChecksForAdmission(log, admissioncheck.NewAdmissionChecks(tc.cq), *tc.wl.Status.Admission)
 			if diff := cmp.Diff(tc.wantAdmissionChecks, gotAdmissionChecks); diff != "" {
 				t.Errorf("Unexpected AdmissionChecks, (want-/got+):\n%s", diff)
 			}
