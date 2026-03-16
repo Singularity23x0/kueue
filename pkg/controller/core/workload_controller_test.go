@@ -2987,7 +2987,7 @@ func TestReconcileSyncAdmissionChecks(t *testing.T) {
 				},
 			},
 		},
-		"add all cq checks to wl with empty assignemnt": {
+		"add all cq checks to wl with empty assignment": {
 			wl: *utiltestingapi.MakeWorkload("wl", "ns").Admission(&kueue.Admission{
 				ClusterQueue:      "cq",
 				PodSetAssignments: []kueue.PodSetAssignment{},
