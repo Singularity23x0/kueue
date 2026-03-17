@@ -151,10 +151,10 @@ var _ = ginkgo.Describe("MultiKueue", func() {
 					Resource(corev1.ResourceMemory, "4G").
 					Obj(),
 			).
+			AdmissionChecks(kueue.AdmissionCheckReference(multiKueueAc.Name)).
 			Preemption(kueue.ClusterQueuePreemption{
 				WithinClusterQueue: kueue.PreemptionPolicyLowerPriority,
 			}).
-			AdmissionChecks(kueue.AdmissionCheckReference(multiKueueAc.Name)).
 			Obj()
 		util.CreateClusterQueuesAndWaitForActive(ctx, k8sManagerClient, managerCq)
 
