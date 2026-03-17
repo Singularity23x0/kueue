@@ -938,14 +938,6 @@ var _ = ginkgo.Describe("MultiKueue", func() {
 					g.Expect(k8sWorker2Client.Get(ctx, highWlKey, &kueue.Workload{})).To(utiltesting.BeNotFoundError())
 				}, util.Timeout, util.Interval).Should(gomega.Succeed())
 			})
-			ginkgo.By("Checking that the high-priority workload is created in worker1 and not in worker2, and that its spec matches the manager workload", func() {
-				gomega.Eventually(func(g gomega.Gomega) {
-					g.Expect(k8sWorker1Client.Get(ctx, highWlKey, workerHighWorkload)).To(gomega.Succeed())
-					g.Expect(workload.IsAdmitted(workerHighWorkload)).To(gomega.BeTrue())
-					g.Expect(workerHighWorkload.Spec).To(gomega.BeComparableTo(managerHighWl.Spec))
-					g.Expect(k8sWorker2Client.Get(ctx, highWlKey, &kueue.Workload{})).To(utiltesting.BeNotFoundError())
-				}, util.Timeout, util.Interval).Should(gomega.Succeed())
-			})
 
 			ginkgo.By("Checking that the low-priority workload was evicted on the manager cluster", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
