@@ -392,7 +392,7 @@ func dropExcludedResources(input corev1.ResourceList, excludedPrefixes []string)
 }
 
 func (i *Info) CalcLocalQueueFSUsage(ctx context.Context, c client.Client, resWeights map[corev1.ResourceName]float64, afsEntryPenalties *queueafs.AfsEntryPenalties, afsConsumedResources *queueafs.AfsConsumedResources) (float64, error) {
-	lqKey := utilqueue.KeyFromWorkload(i.Obj)
+	lqKey := queue.KeyFromWorkload(i.Obj)
 
 	consumed := corev1.ResourceList{}
 	if afsConsumedResources != nil {
