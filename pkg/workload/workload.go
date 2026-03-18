@@ -1419,7 +1419,7 @@ func AdmissionChecksForWorkload(log logr.Logger, wl *kueue.Workload, cq *kueue.C
 
 	if wl.Status.Admission != nil {
 		// If we have an admission we can provide all relevant checks right away.
-		// Checks that are defined with an empty list of flavors are coinsidered
+		// Checks that are defined with an empty list of flavors are considered
 		// to apply to all flavors declared for the ClusterQueue.
 		// These checks are considered valid by this logic, as intended,
 		// because checks with empty OnFlavor lists have their lists populated
