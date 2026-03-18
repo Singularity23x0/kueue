@@ -2970,7 +2970,7 @@ func TestReconcileSyncAdmissionChecks(t *testing.T) {
 				},
 			},
 		},
-		"add only checks covering all flavors to unadmitterd wl from cq with strategy": {
+		"add only checks covering all flavors to unadmitted wl from cq with strategy": {
 			wl: *utiltestingapi.MakeWorkload("wl", "ns").Obj(),
 			cq: *utiltestingapi.MakeClusterQueue("cq").
 				ResourceGroup(
