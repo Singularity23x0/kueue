@@ -3221,7 +3221,7 @@ func TestReconcileSyncAdmissionChecks(t *testing.T) {
 			wl: *utiltestingapi.MakeWorkload("wl", "ns").Admission(&kueue.Admission{
 				ClusterQueue:      "cq",
 				PodSetAssignments: []kueue.PodSetAssignment{},
-			}).Obj(), // todo admitted.Obj(),
+			}).Obj(),
 			cq: *utiltestingapi.MakeClusterQueue("cq").
 				ResourceGroup(
 					*utiltestingapi.MakeFlavorQuotas("flavor1").Obj(),
@@ -3253,7 +3253,7 @@ func TestReconcileSyncAdmissionChecks(t *testing.T) {
 							},
 						},
 					},
-				}).Obj(), // todo admitted
+				}).Obj(),
 			cq: *utiltestingapi.MakeClusterQueue("cq").
 				ResourceGroup(
 					*utiltestingapi.MakeFlavorQuotas("flavor1").Obj(),
