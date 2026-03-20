@@ -22,7 +22,6 @@ import (
 	"github.com/go-logr/logr"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"k8s.io/utils/ptr"
 
@@ -161,7 +160,7 @@ func HasAllChecksReady(wl *kueue.Workload) bool {
 
 // HasAllRequiredChecks returns true if all the relevant checks are present in the workload.
 // (They don't have to be in the Ready state; for that, see HasAllChecksReady).
-func HasAllRequiredChecks(log logr.Logger, wl *kueue.Workload, allChecks map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceFlavorReference]) bool {
+func HasAllRequiredChecks(log logr.Logger, wl *kueue.Workload, allChecks admissioncheck.AdmissionChecks) bool {
 	mustHaveChecks := admissionChecksForAdmission(log, allChecks, *wl.Status.Admission)
 
 	if mustHaveChecks.Len() == 0 {

@@ -40,6 +40,7 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/cache/hierarchy"
 	"sigs.k8s.io/kueue/pkg/resources"
+	"sigs.k8s.io/kueue/pkg/util/admissioncheck"
 	"sigs.k8s.io/kueue/pkg/util/queue"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
@@ -742,7 +743,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Preemption:                    defaultPreemption,
 					AllocatableResourceGeneration: 1,
 					FlavorFungibility:             defaultFlavorFungibility,
-					AdmissionChecks: map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceFlavorReference]{
+					AdmissionChecks: admissioncheck.AdmissionChecks{
 						"check1": sets.New[kueue.ResourceFlavorReference](),
 						"check2": sets.New[kueue.ResourceFlavorReference](),
 					},
@@ -774,7 +775,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Preemption:                    defaultPreemption,
 					AllocatableResourceGeneration: 1,
 					FlavorFungibility:             defaultFlavorFungibility,
-					AdmissionChecks: map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceFlavorReference]{
+					AdmissionChecks: admissioncheck.AdmissionChecks{
 						"check1": sets.New[kueue.ResourceFlavorReference](),
 						"check2": sets.New[kueue.ResourceFlavorReference](),
 					},
@@ -807,7 +808,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Preemption:                    defaultPreemption,
 					AllocatableResourceGeneration: 1,
 					FlavorFungibility:             defaultFlavorFungibility,
-					AdmissionChecks: map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceFlavorReference]{
+					AdmissionChecks: admissioncheck.AdmissionChecks{
 						"check1": sets.New[kueue.ResourceFlavorReference](),
 						"check2": sets.New[kueue.ResourceFlavorReference](),
 					},
@@ -840,7 +841,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Preemption:                    defaultPreemption,
 					AllocatableResourceGeneration: 1,
 					FlavorFungibility:             defaultFlavorFungibility,
-					AdmissionChecks: map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceFlavorReference]{
+					AdmissionChecks: admissioncheck.AdmissionChecks{
 						"check1": sets.New[kueue.ResourceFlavorReference](),
 						"check2": sets.New[kueue.ResourceFlavorReference](),
 					},

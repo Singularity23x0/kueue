@@ -50,6 +50,8 @@ type ConfigHelper[PtrT objAsPtr[T], T any] struct {
 
 type MultiKueueStoreHelper = ConfigHelper[*kueue.MultiKueueConfig, kueue.MultiKueueConfig]
 
+type AdmissionChecks = map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceFlavorReference]
+
 func NewMultiKueueStoreHelper(c client.Client) (*MultiKueueStoreHelper, error) {
 	return NewConfigHelper[*kueue.MultiKueueConfig](c)
 }
@@ -164,10 +166,10 @@ func FilterProvReqAnnotations(annotations map[string]string) map[string]string {
 }
 
 // NewAdmissionChecks aggregates AdmissionChecks from .spec.AdmissionChecksStrategy
-func NewAdmissionChecks(cq *kueue.ClusterQueue) map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceFlavorReference] {
-	var checks map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceFlavorReference]
+func NewAdmissionChecks(cq *kueue.ClusterQueue) AdmissionChecks {
+	var checks AdmissionChecks
 	if cq.Spec.AdmissionChecksStrategy != nil {
-		checks = make(map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceFlavorReference], len(cq.Spec.AdmissionChecksStrategy.AdmissionChecks))
+		checks = make(AdmissionChecks, len(cq.Spec.AdmissionChecksStrategy.AdmissionChecks))
 		for _, check := range cq.Spec.AdmissionChecksStrategy.AdmissionChecks {
 			if len(check.OnFlavors) > 0 {
 				checks[check.Name] = sets.New(check.OnFlavors...)
@@ -176,7 +178,7 @@ func NewAdmissionChecks(cq *kueue.ClusterQueue) map[kueue.AdmissionCheckReferenc
 			}
 		}
 	} else {
-		checks = make(map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceFlavorReference], 0)
+		checks = make(AdmissionChecks, 0)
 	}
 	return checks
 }

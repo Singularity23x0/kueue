@@ -1536,7 +1536,7 @@ func AdmissionChecksForWorkload(log logr.Logger, wl *kueue.Workload, cq *kueue.C
 	return checksForAllFlavors
 }
 
-func admissionChecksForAdmission(log logr.Logger, acs map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceFlavorReference], admission kueue.Admission) sets.Set[kueue.AdmissionCheckReference] {
+func admissionChecksForAdmission(log logr.Logger, acs admissioncheck.AdmissionChecks, admission kueue.Admission) sets.Set[kueue.AdmissionCheckReference] {
 	admissionFlavors := admissionFlavors(admission)
 	if len(admissionFlavors) > 0 {
 		return filterChecks(acs, func(acFlavors flavorSet) bool {
@@ -1552,7 +1552,7 @@ func admissionChecksForAdmission(log logr.Logger, acs map[kueue.AdmissionCheckRe
 	return sets.KeySet(acs)
 }
 
-func filterChecks(acs map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceFlavorReference], fsPredicate func(flavorSet) bool) sets.Set[kueue.AdmissionCheckReference] {
+func filterChecks(acs admissioncheck.AdmissionChecks, fsPredicate func(flavorSet) bool) sets.Set[kueue.AdmissionCheckReference] {
 	acNames := sets.New[kueue.AdmissionCheckReference]()
 	for acName, acFlavors := range acs {
 		if fsPredicate(acFlavors) {

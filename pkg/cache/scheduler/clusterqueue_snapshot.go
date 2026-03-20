@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/metrics"
 	"sigs.k8s.io/kueue/pkg/resources"
+	"sigs.k8s.io/kueue/pkg/util/admissioncheck"
 	utiltas "sigs.k8s.io/kueue/pkg/util/tas"
 	"sigs.k8s.io/kueue/pkg/workload"
 )
@@ -46,7 +47,7 @@ type ClusterQueueSnapshot struct {
 	// Aggregates AdmissionChecks from both .spec.AdmissionChecks and .spec.AdmissionCheckStrategy
 	// Sets hold ResourceFlavors to which an AdmissionCheck should apply.
 	// In case its empty, it means an AdmissionCheck should apply to all ResourceFlavor
-	AdmissionChecks map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceFlavorReference]
+	AdmissionChecks admissioncheck.AdmissionChecks
 	Status          metrics.ClusterQueueStatus
 	// AllocatableResourceGeneration will be increased when some admitted workloads are
 	// deleted, or the resource groups are changed.
