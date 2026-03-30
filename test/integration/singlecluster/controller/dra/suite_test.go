@@ -63,6 +63,7 @@ var _ = ginkgo.BeforeSuite(func() {
 		WebhookPath: util.WebhookPath,
 		APIServerFeatureGates: []string{
 			"DynamicResourceAllocation=true",
+			"DRAExtendedResource=true",
 		},
 		APIServerRuntimeConfig: []string{
 			"resource.k8s.io/v1beta2=true",
@@ -77,6 +78,11 @@ var _ = ginkgo.BeforeSuite(func() {
 var _ = ginkgo.AfterSuite(func() {
 	ginkgo.By("tearing down the test environment")
 	fwk.Teardown()
+})
+
+var _ = ginkgo.ReportAfterSuite("Generate JUnit Report", func(report ginkgo.Report) {
+	err := util.ConfigureSuiteReporting(report)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 })
 
 // Manager setup used by tests to start controllers with DRA ConfigMap configuration

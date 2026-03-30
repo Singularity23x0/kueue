@@ -29,8 +29,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	configapi "sigs.k8s.io/kueue/apis/config/v1beta2"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
 	"sigs.k8s.io/kueue/test/util"
@@ -50,9 +52,11 @@ const (
 	customSAMountPath         = "/etc/custom-sa"
 	cqName                    = "test-kubeconfig-cq"
 	customVisibilityPort      = 9444
+	tokenReviewerRoleName     = "visibility-test-token-reviewer"
+	tokenReviewerBindingName  = "visibility-test-token-reviewer"
 )
 
-var _ = ginkgo.Describe("Visibility Server", func() {
+var _ = ginkgo.Describe("Visibility Server", ginkgo.Label("feature:visibility"), func() {
 	var originalDeployment appsv1.Deployment
 	var originalService corev1.Service
 	var cq *kueue.ClusterQueue
@@ -136,6 +140,7 @@ var _ = ginkgo.Describe("Visibility Server", func() {
 		cloneControllerRBAC(ctx)
 		ginkgo.DeferCleanup(func() {
 			ginkgo.By("Cleaning up our dynamically cloned roles")
+			gomega.Expect(k8sClient.DeleteAllOf(ctx, &rbacv1.ClusterRole{}, client.MatchingLabels{testLabelKey: testLabelValue})).To(gomega.Succeed())
 			gomega.Expect(k8sClient.DeleteAllOf(ctx, &rbacv1.ClusterRoleBinding{}, client.MatchingLabels{testLabelKey: testLabelValue})).To(gomega.Succeed())
 			gomega.Expect(k8sClient.DeleteAllOf(ctx, &rbacv1.RoleBinding{}, client.InNamespace(kueueNS), client.MatchingLabels{testLabelKey: testLabelValue})).To(gomega.Succeed())
 			gomega.Expect(k8sClient.DeleteAllOf(ctx, &rbacv1.RoleBinding{}, client.InNamespace(kubeSystemNamespace), client.MatchingLabels{testLabelKey: testLabelValue})).To(gomega.Succeed())
@@ -152,6 +157,30 @@ var _ = ginkgo.Describe("Visibility Server", func() {
 			Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: customSAName, Namespace: kueueNS}},
 		}
 		util.MustCreate(ctx, k8sClient, authReaderBinding)
+
+		ginkgo.By("Granting token review permissions so delegated authentication still works during the negative authorization check.")
+		tokenReviewerRole := &rbacv1.ClusterRole{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   tokenReviewerRoleName,
+				Labels: map[string]string{testLabelKey: testLabelValue},
+			},
+			Rules: []rbacv1.PolicyRule{{
+				APIGroups: []string{"authentication.k8s.io"},
+				Resources: []string{"tokenreviews"},
+				Verbs:     []string{"create"},
+			}},
+		}
+		util.MustCreate(ctx, k8sClient, tokenReviewerRole)
+
+		tokenReviewerBinding := &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   tokenReviewerBindingName,
+				Labels: map[string]string{testLabelKey: testLabelValue},
+			},
+			RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: tokenReviewerRoleName},
+			Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: customSAName, Namespace: kueueNS}},
+		}
+		util.MustCreate(ctx, k8sClient, tokenReviewerBinding)
 
 		patchedDeployment := originalDeployment.DeepCopy()
 
@@ -181,22 +210,15 @@ var _ = ginkgo.Describe("Visibility Server", func() {
 		gomega.Expect(k8sClient.Update(ctx, patchedDeployment)).To(gomega.Succeed())
 		util.WaitForKueueAvailabilityNoRestartCountCheck(ctx, k8sClient)
 
-		// NEGATIVE TEST: The custom SA lacks 'system:auth-delegator'. The visibility server
-		// is forced to use it, so it cannot perform SubjectAccessReviews.
-		ginkgo.By("Expecting API requests to fail due to lack of auth delegation permissions")
+		// NEGATIVE TEST: The request is authenticated via TokenReview, but the visibility server
+		// itself cannot complete delegated authorization because its identity lacks SubjectAccessReview permission.
+		ginkgo.By("Expecting API requests to fail with internal error due to delegated authorization misconfiguration")
 		gomega.Eventually(func(g gomega.Gomega) {
 			visClient := util.CreateVisibilityClient("")
 			_, err := visClient.ClusterQueues().GetPendingWorkloadsSummary(ctx, cqName, metav1.GetOptions{})
 			g.Expect(err).To(gomega.HaveOccurred())
 
-			// TODO: Fix the internal server error when lacking SubjectAccessReview permissions
-			// See: https://github.com/kubernetes-sigs/kueue/issues/9779
-			isExpectedError := k8serrors.IsUnauthorized(err) ||
-				k8serrors.IsForbidden(err) ||
-				k8serrors.IsInternalError(err) ||
-				k8serrors.IsServiceUnavailable(err)
-
-			g.Expect(isExpectedError).To(gomega.BeTrue(), "Expected an auth or internal error, but got: %v", err)
+			g.Expect(k8serrors.IsInternalError(err)).To(gomega.BeTrue(), "Expected an internal error, but got: %v", err)
 		}, util.Timeout, util.Interval).Should(gomega.Succeed())
 
 		// POSITIVE TEST: Grant the required permissions to our custom ServiceAccount
@@ -239,6 +261,36 @@ var _ = ginkgo.Describe("Visibility Server", func() {
 		}
 		gomega.Expect(k8sClient.Update(ctx, patchedDeployment)).To(gomega.Succeed())
 		util.WaitForKueueAvailabilityNoRestartCountCheck(ctx, k8sClient)
+
+		ginkgo.By("Verifying requests succeed on the custom port")
+		gomega.Eventually(func(g gomega.Gomega) {
+			visClient := util.CreateVisibilityClient("")
+			pw, err := visClient.ClusterQueues().GetPendingWorkloadsSummary(ctx, cqName, metav1.GetOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(pw).NotTo(gomega.BeNil())
+		}, util.Timeout, util.Interval).Should(gomega.Succeed())
+	})
+
+	ginkgo.It("Should use the custom port from the visibilityServer configuration API", func() {
+		ginkgo.By("Updating the visibilityServer configuration and restarting Kueue")
+		util.UpdateKueueConfigurationAndRestart(ctx, k8sClient, defaultKueueCfg, kindClusterName, func(cfg *configapi.Configuration) {
+			cfg.VisibilityServer = &configapi.VisibilityServerConfiguration{
+				BindPort: ptr.To[int32](customVisibilityPort),
+			}
+		})
+		ginkgo.DeferCleanup(func() {
+			ginkgo.By("Restoring original configuration")
+			util.UpdateKueueConfigurationAndRestart(ctx, k8sClient, defaultKueueCfg, kindClusterName)
+		})
+
+		ginkgo.By("Updating the visibility-server service's targetPort")
+		patchedService := originalService.DeepCopy()
+		for i, p := range patchedService.Spec.Ports {
+			if p.Name == "https" {
+				patchedService.Spec.Ports[i].TargetPort = intstr.FromInt32(customVisibilityPort)
+			}
+		}
+		gomega.Expect(k8sClient.Update(ctx, patchedService)).To(gomega.Succeed())
 
 		ginkgo.By("Verifying requests succeed on the custom port")
 		gomega.Eventually(func(g gomega.Gomega) {

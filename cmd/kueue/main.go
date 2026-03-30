@@ -28,6 +28,7 @@ import (
 
 	zaplog "go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	resourceapi "k8s.io/api/resource/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -101,6 +102,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(schedulingv1.AddToScheme(scheme))
+	utilruntime.Must(resourceapi.AddToScheme(scheme))
 
 	utilruntime.Must(kueue.AddToScheme(scheme))
 	utilruntime.Must(kueuev1beta1.AddToScheme(scheme))
@@ -130,7 +132,7 @@ func main() {
 	flag.StringVar(&featureGates, "feature-gates", "", "A set of key=value pairs that describe feature gates for alpha/experimental features.")
 
 	var visibilityServerPort int
-	flag.IntVar(&visibilityServerPort, "visibility-server-port", 8082, "The port the visibility server binds to.")
+	flag.IntVar(&visibilityServerPort, "visibility-server-port", configapi.DefaultVisibilityBindPort, "The port the visibility server binds to.")
 
 	customLogProcessor := zaplog.WrapCore(utillogging.NewCustomLogProcessor)
 
@@ -221,6 +223,8 @@ func main() {
 	}
 	options.Metrics = metricsServerOptions
 
+	lqMetrics := metrics.NewLocalQueueMetricsConfig(cfg.Metrics.LocalQueueMetrics)
+
 	var customLabels *metrics.CustomLabels
 	if features.Enabled(features.CustomMetricLabels) {
 		customLabels = metrics.NewCustomLabels(cfg.Metrics.CustomLabels)
@@ -283,11 +287,13 @@ func main() {
 		schdcache.WithRoleTracker(roleTracker),
 		schdcache.WithResourceMetrics(cfg.Metrics.EnableClusterQueueResources),
 		schdcache.WithCustomLabels(customLabels),
+		schdcache.WithLocalQueueMetrics(lqMetrics),
 	}
 	queueOptions := []qcache.Option{
 		qcache.WithPodsReadyRequeuingTimestamp(podsReadyRequeuingTimestamp(&cfg)),
 		qcache.WithRoleTracker(roleTracker),
 		qcache.WithCustomLabels(customLabels),
+		qcache.WithLocalQueueMetrics(lqMetrics),
 	}
 	if cfg.Resources != nil && len(cfg.Resources.ExcludeResourcePrefixes) > 0 {
 		cacheOptions = append(cacheOptions, schdcache.WithExcludedResourcePrefixes(cfg.Resources.ExcludeResourcePrefixes))
@@ -371,7 +377,7 @@ func main() {
 
 	if features.Enabled(features.VisibilityOnDemand) {
 		go func() {
-			if err := visibility.CreateAndStartVisibilityServer(ctx, queues, *cfg.InternalCertManagement.Enable, kubeConfig, visibilityServerPort, parsedTLSConfig); err != nil {
+			if err := visibility.CreateAndStartVisibilityServer(ctx, queues, &cfg, kubeConfig, visibilityServerPort, parsedTLSConfig); err != nil {
 				setupLog.Error(err, "Unable to create and start visibility server")
 				os.Exit(1)
 			}
@@ -421,7 +427,9 @@ func setupIndexes(ctx context.Context, mgr ctrl.Manager, cfg *configapi.Configur
 	return jobframework.SetupIndexes(ctx, mgr.GetFieldIndexer(), opts...)
 }
 
-func setupControllers(ctx context.Context, mgr ctrl.Manager, cCache *schdcache.Cache, queues *qcache.Manager, cfg *configapi.Configuration, serverVersionFetcher *kubeversion.ServerVersionFetcher, roleTracker *roletracker.RoleTracker, preemptionExpectations *expectations.Store, customLabels *metrics.CustomLabels) error {
+func setupControllers(ctx context.Context, mgr ctrl.Manager, cCache *schdcache.Cache, queues *qcache.Manager,
+	cfg *configapi.Configuration, serverVersionFetcher *kubeversion.ServerVersionFetcher, roleTracker *roletracker.RoleTracker,
+	preemptionExpectations *expectations.Store, customLabels *metrics.CustomLabels) error {
 	if failedCtrl, err := core.SetupControllers(mgr, queues, cCache, cfg, roleTracker, preemptionExpectations, customLabels); err != nil {
 		return fmt.Errorf("unable to create controller %s: %w", failedCtrl, err)
 	}
@@ -544,7 +552,9 @@ func setupProbeEndpoints(mgr ctrl.Manager, certsReady <-chan struct{}) error {
 	return nil
 }
 
-func setupScheduler(mgr ctrl.Manager, cCache *schdcache.Cache, queues *qcache.Manager, cfg *configapi.Configuration, roleTracker *roletracker.RoleTracker, preemptionExpectations *expectations.Store, customLabels *metrics.CustomLabels) error {
+func setupScheduler(mgr ctrl.Manager, cCache *schdcache.Cache, queues *qcache.Manager, cfg *configapi.Configuration,
+	roleTracker *roletracker.RoleTracker, preemptionExpectations *expectations.Store, customLabels *metrics.CustomLabels,
+) error {
 	sched := scheduler.New(
 		queues,
 		cCache,

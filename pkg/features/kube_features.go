@@ -62,8 +62,9 @@ const (
 	// owner: @mukund-wayve
 	// kep: https://github.com/kubernetes-sigs/kueue/issues/9406
 	//
-	// In fair sharing admission ordering, prefer workloads that fit
-	// within their CQ's nominal quota over workloads that require borrowing.
+	// In fair sharing admission ordering, prefer workloads whose subtree
+	// is not borrowing on the workload's requested flavors, checked at
+	// every level of the cohort hierarchy.
 	FairSharingPrioritizeNonBorrowing featuregate.Feature = "FairSharingPrioritizeNonBorrowing"
 
 	// owner: @trasc
@@ -174,8 +175,15 @@ const (
 	// owner: @alaypatel07
 	// kep: https://github.com/kubernetes-sigs/kueue/tree/main/keps/2941-DRA
 	//
-	// Enable quota accounting for Dynamic Resource Allocation (DRA) devies in workloads
+	// Enable quota accounting for Dynamic Resource Allocation (DRA) devices in workloads
 	DynamicResourceAllocation featuregate.Feature = "DynamicResourceAllocation"
+
+	// owner: @sohankunkerkar
+	// kep: https://github.com/kubernetes-sigs/kueue/tree/main/keps/2941-DRA
+	//
+	// Enable extended resources support for DRA. Allows workloads to request DRA devices
+	// via standard resources.requests using DeviceClass extendedResourceName.
+	DRAExtendedResources featuregate.Feature = "DRAExtendedResources"
 
 	// owner: @khrm
 	// kep: https://github.com/kubernetes-sigs/kueue/tree/main/keps/2349-multikueue-external-custom-job-support
@@ -328,6 +336,22 @@ const (
 	//
 	// Enables gating the admission of workloads based on annotations.
 	AdmissionGatedBy featuregate.Feature = "AdmissionGatedBy"
+
+	// owner: @mbobrovskyi
+	//
+	// issue: https://github.com/kubernetes-sigs/kueue/issues/9872
+	//
+	// ShortWorkloadNames ensures that generated Workload names do not exceed
+	// 63 characters, making them compatible with Kubernetes label value limits.
+	ShortWorkloadNames featuregate.Feature = "ShortWorkloadNames"
+
+	// owner: @tkillian
+	// kep: https://github.com/kubernetes-sigs/kueue/tree/main/keps/6143-quota-release-strategy
+	//
+	// When enabled, pods with a DeletionTimestamp are treated as inactive in the
+	// Pod integration's IsActive() check, allowing quota to be released immediately
+	// when preempted pods begin terminating rather than waiting for the grace period.
+	FastQuotaReleaseInPodIntegration featuregate.Feature = "FastQuotaReleaseInPodIntegration"
 )
 
 func init() {
@@ -381,6 +405,7 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 	},
 	LocalQueueMetrics: {
 		{Version: version.MustParse("0.10"), Default: false, PreRelease: featuregate.Alpha},
+		{Version: version.MustParse("0.17"), Default: true, PreRelease: featuregate.Beta},
 	},
 	LocalQueueDefaulting: {
 		{Version: version.MustParse("0.10"), Default: false, PreRelease: featuregate.Alpha},
@@ -431,6 +456,9 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 	},
 	DynamicResourceAllocation: {
 		{Version: version.MustParse("0.14"), Default: false, PreRelease: featuregate.Alpha},
+	},
+	DRAExtendedResources: {
+		{Version: version.MustParse("0.17"), Default: false, PreRelease: featuregate.Alpha},
 	},
 	MultiKueueAdaptersForCustomJobs: {
 		{Version: version.MustParse("0.14"), Default: false, PreRelease: featuregate.Alpha},
@@ -486,7 +514,7 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 		{Version: version.MustParse("0.17"), Default: false, PreRelease: featuregate.Alpha},
 	},
 	SchedulingEquivalenceHashing: {
-		{Version: version.MustParse("0.17"), Default: true, PreRelease: featuregate.Beta},
+		{Version: version.MustParse("0.17"), Default: false, PreRelease: featuregate.Beta},
 	},
 	SchedulerLongRequeueInterval: {
 		{Version: version.MustParse("0.17"), Default: false, PreRelease: featuregate.Alpha}, // remove in 0.20
@@ -509,10 +537,22 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 	AdmissionGatedBy: {
 		{Version: version.MustParse("0.17"), Default: false, PreRelease: featuregate.Alpha},
 	},
+	ShortWorkloadNames: {
+		{Version: version.MustParse("0.17"), Default: false, PreRelease: featuregate.Alpha},
+	},
+	FastQuotaReleaseInPodIntegration: {
+		{Version: version.MustParse("0.17"), Default: false, PreRelease: featuregate.Alpha},
+	},
 }
 
 func SetFeatureGateDuringTest(tb testing.TB, f featuregate.Feature, value bool) {
 	featuregatetesting.SetFeatureGateDuringTest(tb, utilfeature.DefaultFeatureGate, f, value)
+}
+
+func SetFeatureGatesDuringTest(tb testing.TB, featureGates map[featuregate.Feature]bool) {
+	for fg, enable := range featureGates {
+		featuregatetesting.SetFeatureGateDuringTest(tb, utilfeature.DefaultFeatureGate, fg, enable)
+	}
 }
 
 // Enabled is helper for `utilfeature.DefaultFeatureGate.Enabled()`

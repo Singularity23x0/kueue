@@ -279,7 +279,8 @@ func (c *ClusterQueue) PushOrUpdate(wInfo *workload.Info) {
 		specChangedSinceEval := oldInfo.LastEvaluatedGeneration != 0 &&
 			wInfo.Obj.Generation != oldInfo.LastEvaluatedGeneration
 
-		// Update in place if the workload didn't change to potentially become admissible.
+		// Update in place if the workload didn't change to potentially become admissible,
+		// unless Eviction/Requeued status changed which can affect queue order.
 		if !specChangedSinceEval &&
 			equality.Semantic.DeepEqual(oldInfo.Obj.Spec, wInfo.Obj.Spec) &&
 			!priorityBoostAnnotationChanged(oldInfo, wInfo) &&
@@ -288,7 +289,8 @@ func (c *ClusterQueue) PushOrUpdate(wInfo *workload.Info) {
 				apimeta.FindStatusCondition(wInfo.Obj.Status.Conditions, kueue.WorkloadEvicted)) &&
 			equality.Semantic.DeepEqual(apimeta.FindStatusCondition(oldInfo.Obj.Status.Conditions, kueue.WorkloadRequeued),
 				apimeta.FindStatusCondition(wInfo.Obj.Status.Conditions, kueue.WorkloadRequeued)) &&
-			workload.HasClosedPreemptionGate(oldInfo.Obj) == workload.HasClosedPreemptionGate(wInfo.Obj) {
+			workload.HasClosedPreemptionGate(oldInfo.Obj) == workload.HasClosedPreemptionGate(wInfo.Obj) &&
+			!draRequestsChanged(oldInfo, wInfo) {
 			c.inadmissibleWorkloads.insert(key, wInfo)
 			return
 		}
@@ -313,6 +315,16 @@ func priorityBoostAnnotationChanged(oldInfo, newInfo *workload.Info) bool {
 		return false
 	}
 	return oldInfo.Obj.Annotations[controllerconstants.PriorityBoostAnnotationKey] != newInfo.Obj.Annotations[controllerconstants.PriorityBoostAnnotationKey]
+}
+
+// draRequestsChanged returns true if DRA preprocessing changed TotalRequests.
+// DRA extended resources are resolved in Reconcile, which can modify TotalRequests
+// without changing the workload Spec.
+func draRequestsChanged(oldInfo, newInfo *workload.Info) bool {
+	if !features.Enabled(features.DynamicResourceAllocation) {
+		return false
+	}
+	return !equality.Semantic.DeepEqual(oldInfo.TotalRequests, newInfo.TotalRequests)
 }
 
 func (c *ClusterQueue) RebuildLocalQueue(lqName string) {
@@ -413,6 +425,12 @@ func (c *ClusterQueue) requeueIfNotPresent(log logr.Logger, wInfo *workload.Info
 	}
 	log.V(2).Info(logMsg, "clusterQueue", c.name, "workload", key)
 
+	if features.Enabled(features.SchedulingEquivalenceHashing) && wInfo.SchedulingHash != workload.SchedulingHashUnknown && !immediate {
+		if moved := c.handleInadmissibleHash(wInfo.SchedulingHash); moved > 0 {
+			log.V(2).Info("Bulk-moved equivalent workloads to inadmissible", "hash", wInfo.SchedulingHash, "movedCount", moved)
+		}
+	}
+
 	return true
 }
 
@@ -427,8 +445,6 @@ func (c *ClusterQueue) forgetInflightByKey(key workload.Reference) {
 // Only applies to BestEffortFIFO queues; in StrictFIFO the head workload
 // stays in the heap and must not cause equivalent workloads to be skipped.
 func (c *ClusterQueue) handleInadmissibleHash(hash string) int {
-	c.rwm.Lock()
-	defer c.rwm.Unlock()
 	if c.queueingStrategy != kueue.BestEffortFIFO {
 		return 0
 	}

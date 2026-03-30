@@ -111,9 +111,9 @@ type AssignmentClusterQueueState struct {
 	ClusterQueueGeneration int64
 }
 
-// dra holds DRA-specific configuration for workload.Info construction.
 type dra struct {
-	preprocessedDRAResources map[kueue.PodSetReference]corev1.ResourceList
+	preprocessedDRAResources  map[kueue.PodSetReference]corev1.ResourceList
+	replacedExtendedResources map[kueue.PodSetReference]sets.Set[corev1.ResourceName]
 }
 
 type InfoOptions struct {
@@ -140,11 +140,15 @@ func WithResourceTransformations(transforms []config.ResourceTransformation) Inf
 	}
 }
 
-// WithPreprocessedDRAResources creates an InfoOption that provides preprocessed DRA resources.
-func WithPreprocessedDRAResources(draResources map[kueue.PodSetReference]corev1.ResourceList) InfoOption {
+// WithPreprocessedDRAResources provides DRA resources to add and extended resources to remove.
+func WithPreprocessedDRAResources(
+	draResources map[kueue.PodSetReference]corev1.ResourceList,
+	replacedExtendedResources map[kueue.PodSetReference]sets.Set[corev1.ResourceName],
+) InfoOption {
 	return func(o *InfoOptions) {
 		o.dra = dra{
-			preprocessedDRAResources: draResources,
+			preprocessedDRAResources:  draResources,
+			replacedExtendedResources: replacedExtendedResources,
 		}
 	}
 }
@@ -448,7 +452,7 @@ func IsExplicitlyRequestingTAS(podSets ...kueue.PodSet) bool {
 	return slices.ContainsFunc(podSets,
 		func(ps kueue.PodSet) bool {
 			tr := ps.TopologyRequest
-			return tr != nil && (tr.Unconstrained != nil || tr.Required != nil || tr.Preferred != nil || tr.PodSetSliceRequiredTopology != nil || tr.PodSetSliceSize != nil)
+			return tr != nil && (tr.Unconstrained != nil || tr.Required != nil || tr.Preferred != nil || tr.PodSetSliceRequiredTopology != nil || tr.PodSetSliceSize != nil || len(tr.PodsetSliceRequiredTopologyConstraints) > 0)
 		})
 }
 
@@ -590,6 +594,13 @@ func totalRequestsFromPodSets(wl *kueue.Workload, info *InfoOptions) []PodSetRes
 		effectiveRequests = applyResourceTransformations(effectiveRequests, info.resourceTransformations)
 		setRes.Requests = resources.NewRequests(effectiveRequests)
 		if features.Enabled(features.DynamicResourceAllocation) && info.preprocessedDRAResources != nil {
+			// First, remove extended resources that were converted to DRA logical resources
+			if replacedRes, exists := info.replacedExtendedResources[ps.Name]; exists {
+				for extRes := range replacedRes {
+					delete(setRes.Requests, extRes)
+				}
+			}
+			// Then, add the DRA logical resources
 			if draRes, exists := info.preprocessedDRAResources[ps.Name]; exists {
 				for resName, quantity := range draRes {
 					if setRes.Requests == nil {
@@ -1333,17 +1344,6 @@ func HasDRA(w *kueue.Workload) bool {
 	return HasResourceClaim(w) || HasResourceClaimTemplates(w)
 }
 
-// NeedsDRAReconcile returns true if the workload has DRA resources that require
-// processing in the Reconcile loop rather than being queued directly from event
-// handlers. DRA workloads need Reconcile-based processing for proper error
-// handling (e.g. setting Inadmissible conditions on the workload).
-func NeedsDRAReconcile(wl *kueue.Workload) bool {
-	if !features.Enabled(features.DynamicResourceAllocation) {
-		return false
-	}
-	return HasDRA(wl)
-}
-
 // HasResourceClaimTemplates returns true if the workload has ResourceClaimTemplates.
 func HasResourceClaimTemplates(w *kueue.Workload) bool {
 	for _, ps := range w.Spec.PodSets {
@@ -1607,7 +1607,7 @@ func EvictWithRetryOnConflictForPatch() EvictOption {
 	}
 }
 
-func Evict(ctx context.Context, c client.Client, recorder record.EventRecorder, wl *kueue.Workload, reason, msg string, underlyingCause kueue.EvictionUnderlyingCause, clock clock.Clock, tracker *roletracker.RoleTracker, cl *metrics.CustomLabels, options ...EvictOption) error {
+func Evict(ctx context.Context, c client.Client, recorder record.EventRecorder, wl *kueue.Workload, reason, msg string, underlyingCause kueue.EvictionUnderlyingCause, clock clock.Clock, exposeLqMetrics bool, tracker *roletracker.RoleTracker, cl *metrics.CustomLabels, options ...EvictOption) error {
 	opts := DefaultEvictOptions()
 	for _, opt := range options {
 		opt(opts)
@@ -1651,7 +1651,7 @@ func Evict(ctx context.Context, c client.Client, recorder record.EventRecorder, 
 		log.V(3).Info("WARNING: unexpected eviction of workload without status.Admission", "workload", klog.KObj(wl))
 		return nil
 	}
-	reportEvictedWorkload(recorder, wl, wl.Status.Admission.ClusterQueue, reason, msg, underlyingCause, tracker, cl)
+	reportEvictedWorkload(recorder, wl, wl.Status.Admission.ClusterQueue, reason, msg, underlyingCause, exposeLqMetrics, tracker, cl)
 	if reportWorkloadEvictedOnce {
 		metrics.ReportEvictedWorkloadsOnce(wl.Status.Admission.ClusterQueue, reason, string(underlyingCause), PriorityClassName(wl), cl.CQGet(wl.Status.Admission.ClusterQueue), tracker)
 	}
@@ -1736,14 +1736,17 @@ func closeAllPreemptionGates(w *kueue.Workload, now time.Time) {
 	}
 }
 
-func reportEvictedWorkload(recorder record.EventRecorder, wl *kueue.Workload, cqName kueue.ClusterQueueReference, reason, message string, underlyingCause kueue.EvictionUnderlyingCause, tracker *roletracker.RoleTracker, cl *metrics.CustomLabels) {
+func reportEvictedWorkload(recorder record.EventRecorder, wl *kueue.Workload, cqName kueue.ClusterQueueReference,
+	reason, message string, underlyingCause kueue.EvictionUnderlyingCause, exposeLqMetrics bool,
+	tracker *roletracker.RoleTracker, cl *metrics.CustomLabels,
+) {
 	priorityClassName := PriorityClassName(wl)
 	cqCustomLabels := cl.CQGet(cqName)
 	metrics.ReportEvictedWorkloads(cqName, reason, string(underlyingCause), priorityClassName, cqCustomLabels, tracker)
 	if podsReadyToEvictionTime := workloadsWithPodsReadyToEvictedTime(wl); podsReadyToEvictionTime != nil {
 		metrics.ReportPodsReadyToEvictedTimeSeconds(cqName, reason, string(underlyingCause), *podsReadyToEvictionTime, cqCustomLabels, tracker)
 	}
-	if features.Enabled(features.LocalQueueMetrics) {
+	if exposeLqMetrics {
 		lqRef := metrics.LQRefFromWorkload(wl)
 		metrics.ReportLocalQueueEvictedWorkloads(
 			lqRef,
@@ -1840,4 +1843,24 @@ func PriorityChanged(log logr.Logger, old, new *kueue.Workload) bool {
 	}
 	// Check if effective priority changed (for WorkloadPriorityClass value updates or priority-boost annotation).
 	return priority.EffectivePriority(log, old) != priority.EffectivePriority(log, new)
+}
+
+// TASAssignedNodeNames extracts the unique set of node names that a Workload is assigned to.
+func TASAssignedNodeNames(wl *kueue.Workload) []string {
+	if !IsAdmittedByTAS(wl) {
+		return nil
+	}
+
+	nodesSet := sets.New[string]()
+	for _, psa := range wl.Status.Admission.PodSetAssignments {
+		if psa.TopologyAssignment == nil || !tas.IsLowestLevelHostname(psa.TopologyAssignment.Levels) {
+			continue
+		}
+		for domain := range tas.InternalSeqFrom(psa.TopologyAssignment) {
+			if len(domain.Values) > 0 && domain.Count > 0 {
+				nodesSet.Insert(domain.Values[len(domain.Values)-1])
+			}
+		}
+	}
+	return nodesSet.UnsortedList()
 }

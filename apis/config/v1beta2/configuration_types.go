@@ -105,6 +105,10 @@ type Configuration struct {
 	// of Kueue-managed objects. A nil value disables all automatic deletions.
 	// +optional
 	ObjectRetentionPolicies *ObjectRetentionPolicies `json:"objectRetentionPolicies,omitempty"`
+
+	// VisibilityServer configures the visibility server.
+	// +optional
+	VisibilityServer *VisibilityServerConfiguration `json:"visibilityServer,omitempty"`
 }
 
 type ControllerManager struct {
@@ -183,6 +187,10 @@ type ControllerMetrics struct {
 	// +optional
 	// +kubebuilder:validation:MaxItems=8
 	CustomLabels []ControllerMetricsCustomLabel `json:"customLabels,omitempty"`
+
+	// LocalQueueMetrics is a configuration that provides LocalQueue metrics options.
+	// +optional
+	LocalQueueMetrics *LocalQueueMetrics `json:"localQueueMetrics,omitempty"`
 }
 
 // ControllerMetricsCustomLabel defines a Kubernetes label or annotation to promote
@@ -205,6 +213,18 @@ type ControllerMetricsCustomLabel struct {
 	// Mutually exclusive with SourceLabelKey.
 	// +optional
 	SourceAnnotationKey string `json:"sourceAnnotationKey,omitempty"`
+}
+
+// LocalQueueMetrics defines the configuration options for local queue metrics.
+// If left empty, then metrics will expose for all local queues across namespaces.
+type LocalQueueMetrics struct {
+	// Enable is a knob to allow metrics to be exposed for local queues. Defaults to true.
+	// +optional
+	Enable bool `json:"enable,omitempty"`
+
+	// LocalQueueSelector can be used to choose the local queues that need metrics to be collected.
+	// +optional
+	LocalQueueSelector *metav1.LabelSelector `json:"localQueueSelector,omitempty"`
 }
 
 // ControllerHealth defines the health configs.
@@ -617,4 +637,16 @@ type WorkloadRetentionPolicy struct {
 	// Represented using metav1.Duration (e.g. "10m", "1h30m").
 	// +optional
 	AfterDeactivatedByKueue *metav1.Duration `json:"afterDeactivatedByKueue,omitempty"`
+}
+
+type VisibilityServerConfiguration struct {
+	// BindAddress is the IP address the visibility server listens on.
+	// Defaults to 0.0.0.0 (all network interfaces).
+	// +optional
+	BindAddress *string `json:"bindAddress,omitempty"`
+
+	// BindPort is the port the visibility server listens on.
+	// Defaults to 8082.
+	// +optional
+	BindPort *int32 `json:"bindPort,omitempty"`
 }

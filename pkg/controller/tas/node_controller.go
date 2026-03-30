@@ -67,7 +67,7 @@ const (
 
 	podTerminatedByKueueConditionType    = "TerminatedByKueue"
 	podTerminatedByKueueConditionReason  = "UnschedulableOnAssignedNode"
-	podTerminatedByKueueConditionMessage = "Pod terminated by Kueue NodeFailureController due to node taint"
+	podTerminatedByKueueConditionMessage = "Pod terminated by Kueue NodeController due to node taint"
 	podTerminatedByKueueEventReason      = "PodTerminatedByKueue"
 )
 
@@ -308,26 +308,30 @@ func groupPodsByWorkload(pods []corev1.Pod) map[types.NamespacedName][]*corev1.P
 // getWorkloadsOnNode gets all workloads that have the given node assigned in TAS topology assignment
 // or have "late" pods assigned to this node via nodeSelector.
 func (r *nodeReconciler) getWorkloadsOnNode(ctx context.Context, nodeName string, nodeSelectorPodsByWorkload map[types.NamespacedName][]*corev1.Pod) (sets.Set[types.NamespacedName], error) {
-	var allWorkloads kueue.WorkloadList
-	if err := r.client.List(ctx, &allWorkloads); err != nil {
+	var workloadsOnNode kueue.WorkloadList
+	if err := r.client.List(ctx, &workloadsOnNode, client.MatchingFields{indexer.AdmittedWorkloadNodesKey: nodeName}); err != nil {
 		return nil, fmt.Errorf("failed to list workloads: %w", err)
 	}
 	tasWorkloadsOnNode := sets.New[types.NamespacedName]()
-	for i := range allWorkloads.Items {
-		wl := &allWorkloads.Items[i]
-		if workload.IsFinished(wl) || workload.IsEvicted(wl) {
-			continue
-		}
-		wlKey := types.NamespacedName{Name: wl.Name, Namespace: wl.Namespace}
-		if utiltas.HasTASAssignmentOnNode(wl.Status.Admission.PodSetAssignments, nodeName) {
-			tasWorkloadsOnNode.Insert(wlKey)
-			continue
-		}
+	for i := range workloadsOnNode.Items {
+		wl := &workloadsOnNode.Items[i]
+		tasWorkloadsOnNode.Insert(types.NamespacedName{Name: wl.Name, Namespace: wl.Namespace})
+	}
 
-		// Also find workloads from any pods that are assigned to this node by TopologyAssignment
-		// but not yet bound. These might be stale "late" pods for a workload that has already
-		// been reassigned to another node.
-		if len(nodeSelectorPodsByWorkload[wlKey]) > 0 {
+	logger := r.logger().V(4).WithValues("node", nodeName)
+	// Also find workloads from any pods that are assigned to this node by TopologyAssignment
+	// but not yet bound. These might be stale "late" pods for a workload that has already
+	// been reassigned to another node.
+	for wlKey := range nodeSelectorPodsByWorkload {
+		if tasWorkloadsOnNode.Has(wlKey) {
+			continue
+		}
+		var wl kueue.Workload
+		if err := r.client.Get(ctx, wlKey, &wl); err != nil {
+			logger.V(4).Info("Failed to get workload", "workload", wlKey, "error", err)
+			continue
+		}
+		if !workload.IsFinished(&wl) && !workload.IsEvicted(&wl) {
 			tasWorkloadsOnNode.Insert(wlKey)
 		}
 	}
@@ -360,7 +364,7 @@ func (r *nodeReconciler) getWorkloadStatus(ctx context.Context, nodeName string,
 	case !features.Enabled(features.TASReplaceNodeOnNodeTaints):
 		return workloadHealthCheck{status: workloadHealthy}, nil
 	default:
-		untolerated, temporarilyTolerated := classifyNoExecuteTaints(ctx, node.Spec.Taints, workload.PodSetsOnNode(wl, nodeName))
+		untolerated, temporarilyTolerated := classifyTaints(ctx, node.Spec.Taints, workload.PodSetsOnNode(wl, nodeName))
 
 		if len(untolerated) > 0 {
 			if !features.Enabled(features.TASReplaceNodeOnPodTermination) {
@@ -403,7 +407,8 @@ func (r *nodeReconciler) evictWorkloadIfNeeded(ctx context.Context, wl *kueue.Wo
 		log.V(3).Info("Evicting workload due to multiple node failures")
 		allUnhealthyNodeNames := append(unhealthyNodeNames, nodeName)
 		evictionMsg := fmt.Sprintf(nodeMultipleFailuresEvictionMessageFormat, strings.Join(allUnhealthyNodeNames, ", "))
-		if evictionErr := workload.Evict(ctx, r.client, r.recorder, wl, kueue.WorkloadEvictedDueToNodeFailures, evictionMsg, "", r.clock, r.roleTracker, nil); evictionErr != nil {
+		exposeLqMetrics := r.cache.ShouldExposeLocalQueueMetricsForWorkload(log, wl)
+		if evictionErr := workload.Evict(ctx, r.client, r.recorder, wl, kueue.WorkloadEvictedDueToNodeFailures, evictionMsg, "", r.clock, exposeLqMetrics, r.roleTracker, nil); evictionErr != nil {
 			log.Error(evictionErr, "Failed to complete eviction process")
 			return false, evictionErr
 		} else {
@@ -655,10 +660,10 @@ func checkTaintTolerations(logger logr.Logger, taint *corev1.Taint, podSets []ku
 	return toleratedPermanently
 }
 
-func classifyNoExecuteTaints(ctx context.Context, taints []corev1.Taint, podSets []kueue.PodSet) (untolerated, temporarilyTolerated []corev1.Taint) {
+func classifyTaints(ctx context.Context, taints []corev1.Taint, podSets []kueue.PodSet) (untolerated, temporarilyTolerated []corev1.Taint) {
 	logger := ctrl.LoggerFrom(ctx)
 	for _, taint := range taints {
-		if taint.Effect != corev1.TaintEffectNoExecute {
+		if taint.Effect != corev1.TaintEffectNoExecute && taint.Effect != corev1.TaintEffectNoSchedule {
 			continue
 		}
 
@@ -672,7 +677,7 @@ func classifyNoExecuteTaints(ctx context.Context, taints []corev1.Taint, podSets
 		}
 	}
 	if len(untolerated) > 0 || len(temporarilyTolerated) > 0 {
-		logger.V(3).Info("Classified NoExecute taints", "untolerated", untolerated, "temporarilyTolerated", temporarilyTolerated)
+		logger.V(3).Info("Classified taints", "untolerated", untolerated, "temporarilyTolerated", temporarilyTolerated)
 	}
 	return untolerated, temporarilyTolerated
 }

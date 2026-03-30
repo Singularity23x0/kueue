@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strconv"
 	"strings"
 	"time"
 
@@ -71,12 +72,6 @@ import (
 const (
 	FailedToStartFinishedReason = "FailedToStart"
 	managedOwnersChainLimit     = 10
-
-	// PodsetReplicaSizesAnnotation is set on the job when autoscaling causes
-	// PodSet replica sizes to differ from the original spec. The value is a JSON
-	// array compatible with []kueue.PodSet, containing only the changed PodSets.
-	// This annotation is alpha-level enabled by the ElasticJobsViaWorkloadSlices.
-	PodsetReplicaSizesAnnotation = "kueue.x-k8s.io/podset-replica-sizes"
 )
 
 var (
@@ -94,6 +89,7 @@ type WorkloadRetentionPolicy struct {
 
 // JobReconciler reconciles a GenericJob object
 type JobReconciler struct {
+	cache                        *schdcache.Cache
 	client                       client.Client
 	record                       record.EventRecorder
 	manageJobsWithoutQueueName   bool
@@ -268,6 +264,7 @@ func NewReconciler(
 	options := ProcessOptions(opts...)
 
 	return &JobReconciler{
+		cache:                        options.Cache,
 		client:                       client,
 		record:                       record,
 		manageJobsWithoutQueueName:   options.ManageJobsWithoutQueueName,
@@ -566,7 +563,7 @@ func (r *JobReconciler) ReconcileGenericJob(ctx context.Context, req ctrl.Reques
 				admittedCond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadAdmitted)
 				admittedUntilReadyWaitTime := condition.LastTransitionTime.Sub(admittedCond.LastTransitionTime.Time)
 				metrics.ReportAdmittedUntilReadyWaitTime(cqName, priorityClassName, admittedUntilReadyWaitTime, r.customLabels.CQGet(cqName), r.roleTracker)
-				if features.Enabled(features.LocalQueueMetrics) {
+				if r.cache.ShouldExposeLocalQueueMetricsForWorkload(log, wl) {
 					lqRef := metrics.LQRefFromWorkload(wl)
 					lqCustomLabels := r.customLabels.LQGet(utilqueue.KeyFromWorkload(wl))
 					metrics.LocalQueueReadyWaitTime(lqRef, priorityClassName, queuedUntilReadyWaitTime, lqCustomLabels, r.roleTracker)
@@ -1364,7 +1361,13 @@ func (r *JobReconciler) constructWorkload(ctx context.Context, job GenericJob) (
 func newWorkloadName(job GenericJob) string {
 	object := job.Object()
 	if WorkloadSliceEnabled(job) {
-		return GetWorkloadNameForOwnerWithGVKAndGeneration(object.GetName(), object.GetUID(), job.GVK(), object.GetGeneration())
+		extra := ""
+		if elasticWorkloadNameProvider, ok := job.(ElasticWorkloadNameProvider); ok {
+			extra = elasticWorkloadNameProvider.GetWorkloadNameExtraPart()
+		} else {
+			extra = strconv.FormatInt(object.GetGeneration(), 10)
+		}
+		return GenerateWorkloadNameWithExtra(object.GetName(), object.GetUID(), job.GVK(), extra)
 	}
 	return GetWorkloadNameForOwnerWithGVK(object.GetName(), object.GetUID(), job.GVK())
 }

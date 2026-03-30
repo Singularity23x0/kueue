@@ -36,7 +36,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/cache/hierarchy"
 	queueafs "sigs.k8s.io/kueue/pkg/cache/queue/afs"
 	utilindexer "sigs.k8s.io/kueue/pkg/controller/core/indexer"
-	"sigs.k8s.io/kueue/pkg/features"
+	"sigs.k8s.io/kueue/pkg/dra"
 	"sigs.k8s.io/kueue/pkg/metrics"
 	afs "sigs.k8s.io/kueue/pkg/util/admissionfairsharing"
 	"sigs.k8s.io/kueue/pkg/util/queue"
@@ -103,6 +103,13 @@ func WithCustomLabels(cl *metrics.CustomLabels) Option {
 	}
 }
 
+// WithLocalQueueMetrics sets the configuration for local queue metrics.
+func WithLocalQueueMetrics(value *metrics.LocalQueueMetricsConfig) Option {
+	return func(m *Manager) {
+		m.lqMetrics = value
+	}
+}
+
 // SetDRAReconcileChannel sets the DRA reconcile channel after manager creation.
 func (m *Manager) SetDRAReconcileChannel(ch chan<- event.TypedGenericEvent[*kueue.Workload]) {
 	m.draReconcileChannel = ch
@@ -146,6 +153,7 @@ type Manager struct {
 
 	roleTracker  *roletracker.RoleTracker
 	customLabels *metrics.CustomLabels
+	lqMetrics    *metrics.LocalQueueMetricsConfig
 
 	requeuer inadmissibleRequeuer
 }
@@ -413,7 +421,7 @@ func (m *Manager) AddLocalQueue(ctx context.Context, q *kueue.LocalQueue) error 
 		}
 
 		log := ctrl.LoggerFrom(ctx).WithValues("workload", klog.KObj(&w))
-		if workload.NeedsDRAReconcile(&w) {
+		if dra.NeedsDRAReconcile(&w) {
 			if m.draReconcileChannel != nil {
 				m.draReconcileChannel <- event.TypedGenericEvent[*kueue.Workload]{Object: &w}
 				log.V(4).Info("Sent DRA workload to reconcile channel due to LocalQueue creation")
@@ -470,7 +478,9 @@ func (m *Manager) DeleteLocalQueue(log logr.Logger, q *kueue.LocalQueue) {
 		cq.DeleteFromLocalQueue(log, qImpl, m.roleTracker, m.customLabels)
 		cq.deleteLocalQueue(key)
 	}
-	clearLQMetrics(key)
+	if m.lqMetrics.IsEnabled() {
+		clearLQMetrics(key)
+	}
 	delete(m.localQueues, key)
 }
 
@@ -599,23 +609,6 @@ func (m *Manager) RequeueWorkload(ctx context.Context, info *workload.Info, reas
 		m.Broadcast()
 	}
 	return added
-}
-
-// HandleInadmissibleHash bulk-moves all workloads in the ClusterQueue's heap
-// that share the given scheduling hash to inadmissibleWorkloads.
-func (m *Manager) HandleInadmissibleHash(cqName kueue.ClusterQueueReference, hash string) int {
-	m.RLock()
-	defer m.RUnlock()
-	cq := m.hm.ClusterQueue(cqName)
-	if cq == nil {
-		return 0
-	}
-	moved := cq.handleInadmissibleHash(hash)
-	if moved > 0 {
-		// Update pending metrics for the CQ and all its LocalQueues.
-		reportPendingWorkloads(m, cqName)
-	}
-	return moved
 }
 
 // Delete the workload from queue or cluster queue.
@@ -884,7 +877,7 @@ func (m *Manager) ResyncGaugeMetrics() {
 		reportCQPendingWorkloads(m, cq)
 		reportCQFinishedWorkloads(cq, m.roleTracker, m.customLabels)
 	}
-	if features.Enabled(features.LocalQueueMetrics) {
+	if m.lqMetrics.IsEnabled() {
 		for _, lq := range m.localQueues {
 			reportLQPendingWorkloads(m, lq)
 			reportLQFinishedWorkloads(m, lq)
