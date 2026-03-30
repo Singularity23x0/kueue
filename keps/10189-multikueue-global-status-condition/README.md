@@ -22,14 +22,14 @@ tags, and then generate with `hack/update-toc.sh`.
   - [Goals](#goals)
   - [Non-Goals](#non-goals)
 - [Proposal](#proposal)
-  - [User Stories (Optional)](#user-stories-optional)
-    - [Story 1 (Optional)](#story-1-optional)
-    - [Story 2 (Optional)](#story-2-optional)
-  - [Notes/Constraints/Caveats (Optional)](#notesconstraintscaveats-optional)
+  - [User Stories](#user-stories)
+    - [Story 1](#story-1)
+    - [Story 2](#story-2)
+  - [Notes/Constraints/Caveats (Optional)](#notesconstraintscaveats)
   - [Risks and Mitigations](#risks-and-mitigations)
 - [Design Details](#design-details)
   - [Test Plan](#test-plan)
-    - [Prerequisite testing updates](#prerequisite-testing-updates)
+    <!-- - [Prerequisite testing updates](#prerequisite-testing-updates) -->
     - [Unit tests](#unit-tests)
     - [Integration tests](#integration-tests)
     - [e2e tests](#e2e-tests)
@@ -44,24 +44,14 @@ tags, and then generate with `hack/update-toc.sh`.
 The Workload status in queue in the Management Cluster must reflect the true state of the workload derived from the remote cluster,
 including a human-readable message explaining the state (e.g., "Waiting for quota in cluster X").
 
-This KEP descibes a mechanism to provide such high-level summary in the form of a new Workload Status Condition - the **MultiKueueWorkload** conditon.
+This KEP focuses on a mechanism to provide such high-level summary in the form of a new Workload Status Condition - the **MultiKueueWorkload** conditon.
 The condition:
 1. Will be populated for workloads created on the Manager Cluster.
 1. Will provide a high-level, human-readable message explaining the state of the Manager Workload.
 1. Will provide insights into the Workload's progress throughout its **whole lifecycle**.
 1. Will aggregate the information on all the Remote Workloads dispatched by MultiKueue to Worker Clusters for the subject Manager Workload.
 
-
 ## Motivation
-
-<!--
-This section is for explicitly listing the motivation, goals, and non-goals of
-this KEP.  Describe why the change is important and the benefits to users. The
-motivation section can optionally provide links to [experience reports] to
-demonstrate the interest in a KEP within the wider Kubernetes community.
-
-[experience reports]: https://github.com/golang/go/wiki/ExperienceReports
--->
 
 Currently, the Workload Status subresource is missing key information aggregating data from across its remote counterparts on Worker Clusters.
 The existing condition do not track the process of dispatching Remote Workloads to Workers, obstructing the details of MultiKueue's most critical part of the workloads execution.
@@ -137,19 +127,13 @@ My job hasn’t been admitted for a long time. I would like to verify why that i
 Are remotes being created? Have they been dispatched to all workers? What is their status there? Are they waiting for quota? Are they waiting for admission checks?
 
 ### Notes/Constraints/Caveats
-<!--
-What are the caveats to the proposal?
-What are some important details that didn't come across above?
-Go in to as much detail as necessary here.
-This might be a good place to talk about core concepts and how they relate.
--->
 
 This proposal is limited to only providing the user with a high-level summary.
 This is a minimum value proposition, lacking in a few key areas:
 * In the WAITING_FOR_WORKER state we only provide a miniscule summary of what is happening on the Workers. In reality, this state is much more complex than the messages we propose can describe and could greatly benefiot form being accompanied by a set of aggregations describing in greater detail what is the status of each Remote Workload.
 * In an effort ot keep the condition message concise, we ware limited in how much data relevant to the user we can provide.
 
-In the (alternatives section)[#alternatives] we breifly describe an expanded Global Status Summary proposal to be revisited in the future if the new conidtion by itself is deemed insufficient.
+In the [alternatives section](#global-status-summary) we breifly describe an expanded Global Status Summary proposal to be revisited in the future if the new conidtion by itself is deemed insufficient.
 
 ### Risks and Mitigations
 
@@ -167,7 +151,7 @@ Consider including folks who also work outside the SIG or subproject.
 
 ## Design Details
 
-The new condition type will be defined alongside existing ones in the (workload types file)[https://github.com/Singularity23x0/kueue/blob/66c2cf1a93ee3f19d8b29309d27832a4595d4106/apis/kueue/v1beta1/workload_types.go#L628].
+The new condition type will be defined alongside existing ones in the [workload types file](https://github.com/Singularity23x0/kueue/blob/66c2cf1a93ee3f19d8b29309d27832a4595d4106/apis/kueue/v1beta1/workload_types.go#L628).
 
 ```go
 const (
@@ -189,7 +173,7 @@ const (
 )
 ```
 
-The MultiKueueGlobalStatus enumeration will be defined in the (MultiKueue types file)[https://github.com/Singularity23x0/kueue/blob/66c2cf1a93ee3f19d8b29309d27832a4595d4106/apis/kueue/v1beta1/multikueue_types.go#L17].
+The MultiKueueGlobalStatus enumeration will be defined in the [MultiKueue types file](https://github.com/Singularity23x0/kueue/blob/66c2cf1a93ee3f19d8b29309d27832a4595d4106/apis/kueue/v1beta1/multikueue_types.go#L17).
 
 ```go
 const (
@@ -225,8 +209,8 @@ const (
 
 ```
 
-The condition will be populated inside the (Reconciler of the MultiKueue Core Controller)[https://github.com/Singularity23x0/kueue/blob/66c2cf1a93ee3f19d8b29309d27832a4595d4106/pkg/controller/admissionchecks/multikueue/workload.go#L158].
-This reconiler already gathers all the necessary data in the form of the (Workload Group)[https://github.com/Singularity23x0/kueue/blob/66c2cf1a93ee3f19d8b29309d27832a4595d4106/pkg/controller/admissionchecks/multikueue/workload.go#L83] internal structure.
+The condition will be populated inside the [Reconciler of the MultiKueue Core Controller](https://github.com/Singularity23x0/kueue/blob/66c2cf1a93ee3f19d8b29309d27832a4595d4106/pkg/controller/admissionchecks/multikueue/workload.go#L158).
+This reconiler already gathers all the necessary data in the form of the [Workload Group](https://github.com/Singularity23x0/kueue/blob/66c2cf1a93ee3f19d8b29309d27832a4595d4106/pkg/controller/admissionchecks/multikueue/workload.go#L83) internal structure.
 
 The logic identifying the MultiKueueGlobalStatus,
 calculating neccessary aggregations and generating the appropriate MultiKueueGlobalStatusMessage will be implemented in the
@@ -242,17 +226,6 @@ For the defined messages, each variable can be determined using the data present
 
 ### Test Plan
 
-<!--
-**Note:** *Not required until targeted at a release.*
-The goal is to ensure that we don't accept enhancements with inadequate testing.
-
-All code is expected to have adequate tests (eventually with coverage
-expectations). Please adhere to the [Kubernetes testing guidelines][testing-guidelines]
-when drafting this test plan.
-
-[testing-guidelines]: https://git.k8s.io/community/contributors/devel/sig-testing/testing.md
--->
-
 [ ] I/we understand the owners of the involved components may require updates to
 existing tests to make this code solid enough prior to committing the changes necessary
 to implement this enhancement.
@@ -266,15 +239,15 @@ implementing this enhancement to ensure the enhancements have also solid foundat
 
 #### Unit tests
 
-Unit tests will be added for the methods identifying the MultiKueueGlobalStatus and calculating the condition as part of the (MultiKueue Workload Controller)[https://github.com/Singularity23x0/kueue/blob/66c2cf1a93ee3f19d8b29309d27832a4595d4106/pkg/controller/admissionchecks/multikueue/workload_test.go#L17] test suite.
+Unit tests will be added for the methods identifying the MultiKueueGlobalStatus and calculating the condition as part of the [MultiKueue Workload Controller](https://github.com/Singularity23x0/kueue/blob/66c2cf1a93ee3f19d8b29309d27832a4595d4106/pkg/controller/admissionchecks/multikueue/workload_test.go#L17) test suite.
 
 #### Integration tests
 
-Integration tests for assigning the expected condition correctly for each Global Status will be added in a new file as part of the (MultiKueue Integration Test Suite)[https://github.com/Singularity23x0/kueue/blob/66c2cf1a93ee3f19d8b29309d27832a4595d4106/test/integration/multikueue/suite_test.go#L93].
+Integration tests for assigning the expected condition correctly for each Global Status will be added in a new file as part of the [MultiKueue Integration Test Suite](https://github.com/Singularity23x0/kueue/blob/66c2cf1a93ee3f19d8b29309d27832a4595d4106/test/integration/multikueue/suite_test.go#L93).
 
 #### e2e tests
 
-Integration tests for assigning the expected condition correctly for each Global Status will be added in a new file as part of the (MultiKueue E2E Test Suite)[https://github.com/Singularity23x0/kueue/blob/66c2cf1a93ee3f19d8b29309d27832a4595d4106/test/e2e/multikueue/suite_test.go#L62].
+Integration tests for assigning the expected condition correctly for each Global Status will be added in a new file as part of the [MultiKueue E2E Test Suite](https://github.com/Singularity23x0/kueue/blob/66c2cf1a93ee3f19d8b29309d27832a4595d4106/test/e2e/multikueue/suite_test.go#L62).
 
 ### Graduation Criteria
 
@@ -294,25 +267,24 @@ milestones with these graduation criteria:
 [deprecation-policy]: https://kubernetes.io/docs/reference/using-api/deprecation-policy/
 -->
 
-- Alpha:
-- Beta:
-- Stable:
+- **Alpha**:
+- **Beta**:
+- **Stable**:
 
 
 ## Implementation History
 
-- 2026-03-30: initial KEP draft.
+- **2026-03-30**: initial KEP draft.
 
 ## Drawbacks
 
-<!--
-Why should this KEP _not_ be implemented?
--->
+- We add a Condition that does not behave as a typical one would:
+  - it is expected to either be True or not present,
+  - the reason is not really a reason in the semantic sense of the word.
+-
 
-## Alternatives {#alternatives}
+## Alternatives
 
-<!--
-What other approaches did you consider, and why did you rule them out? These do
-not need to be as detailed as the proposal, but should include enough
-information to express the idea and why it was not acceptable.
--->
+### Global Status Summary
+
+
