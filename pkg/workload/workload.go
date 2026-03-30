@@ -1526,7 +1526,7 @@ func AdmissionChecksForWorkload(log logr.Logger, wl *kueue.Workload, cq *kueue.C
 	// the checks which apply to all flavors supported by the ClusterQueue
 	allFlavors := queue.AllFlavors(cq.Spec.ResourceGroups)
 	checksForAllFlavors := filterChecks(allChecks, func(acFlavors flavorSet) bool {
-		return allFlavors.Difference(acFlavors).Len() == 0
+		return acFlavors.IsSuperset(allFlavors)
 	})
 	log.V(3).Info(
 		"Workload has no Admission: assigning only checks that apply to all workloads in the Cluster Queue regardless of flavor",
@@ -1537,7 +1537,7 @@ func AdmissionChecksForWorkload(log logr.Logger, wl *kueue.Workload, cq *kueue.C
 }
 
 func admissionChecksForAdmission(log logr.Logger, acs map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceFlavorReference], admission kueue.Admission) sets.Set[kueue.AdmissionCheckReference] {
-	admissionFlavors := admissionFlavors(admission)
+	admissionFlavors := findAdmissionFlavors(admission)
 	if len(admissionFlavors) > 0 {
 		return filterChecks(acs, func(acFlavors flavorSet) bool {
 			return admissionFlavors.Intersection(acFlavors).Len() > 0
@@ -1562,7 +1562,7 @@ func filterChecks(acs map[kueue.AdmissionCheckReference]sets.Set[kueue.ResourceF
 	return acNames
 }
 
-func admissionFlavors(admission kueue.Admission) sets.Set[kueue.ResourceFlavorReference] {
+func findAdmissionFlavors(admission kueue.Admission) sets.Set[kueue.ResourceFlavorReference] {
 	assignedFlavors := sets.New[kueue.ResourceFlavorReference]()
 	for _, podSet := range admission.PodSetAssignments {
 		for _, flavor := range podSet.Flavors {
