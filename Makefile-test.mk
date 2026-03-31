@@ -60,7 +60,12 @@ KIND_CLUSTER_NAME ?= kind
 # Number of processes to use during e2e tests.
 E2E_NPROCS ?= 1
 
-GINKGO_ARGS += $(if $(filter-out 1,$(E2E_NPROCS)),-procs=$(E2E_NPROCS))
+# Inject the number of procs into GINKGO_ARGS
+GINKGO_PROC_ARG := $(if $(filter-out 1,$(E2E_NPROCS)),-procs=$(E2E_NPROCS))
+# Check empty string to avoid adding a trailing space
+ifneq ($(GINKGO_PROC_ARG),)
+    GINKGO_ARGS += $(GINKGO_PROC_ARG)
+endif
 
 # For restricting to a specific directory
 GO_TEST_TARGET ?= .
@@ -96,6 +101,10 @@ test: gotestsum ## Run tests.
 
 .PHONY: test-integration
 test-integration: compile-crd-manifests envtest ginkgo dep-crds kueuectl ginkgo-top ## Run integration tests for all singlecluster suites.
+	$(MAKE) test-integration-run
+
+.PHONY: test-integration-run
+test-integration-run:
 	KUBEBUILDER_ASSETS="$(KUBEBUILDER_ASSETS)" \
 	PROJECT_DIR=$(PROJECT_DIR)/ \
 	KUEUE_BIN=$(BIN_DIR) \
