@@ -20,6 +20,7 @@ GO_TEST_FLAGS ?= -race
 
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION ?= 1.35
+KUBEBUILDER_ASSETS = $(or $(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path),$(error setup-envtest failed to download binaries. KUBEBUILDER_ASSETS is empty))
 
 TEST_LOG_LEVEL ?= -3
 
@@ -37,7 +38,7 @@ INTEGRATION_API_LOG_LEVEL ?= 0
 
 # Folder where the e2e tests are located.
 E2E_TARGET ?= ./test/e2e/...
-E2E_K8S_VERSIONS ?= 1.32.11 1.33.7 1.34.3 1.35.0
+E2E_K8S_VERSIONS ?= 1.33.7 1.34.3 1.35.0
 E2E_K8S_VERSION ?= 1.35
 E2E_K8S_FULL_VERSION ?= $(filter $(E2E_K8S_VERSION).%,$(E2E_K8S_VERSIONS))
 # Default to E2E_K8S_VERSION.0 if no match is found
@@ -59,7 +60,12 @@ KIND_CLUSTER_NAME ?= kind
 # Number of processes to use during e2e tests.
 E2E_NPROCS ?= 1
 
-GINKGO_ARGS += $(if $(filter-out 1,$(E2E_NPROCS)),-procs=$(E2E_NPROCS))
+# Inject the number of procs into GINKGO_ARGS
+GINKGO_PROC_ARG := $(if $(filter-out 1,$(E2E_NPROCS)),-procs=$(E2E_NPROCS))
+# Check empty string to avoid adding a trailing space
+ifneq ($(GINKGO_PROC_ARG),)
+    GINKGO_ARGS += $(GINKGO_PROC_ARG)
+endif
 
 # For restricting to a specific directory
 GO_TEST_TARGET ?= .
@@ -79,7 +85,7 @@ test: gotestsum ## Run tests.
 
 ## Label Taxonomy:
 ##   Controllers: controller:workload, controller:localqueue, controller:clusterqueue, controller:admissioncheck, controller:resourceflavor, controller:provisioning
-##   Job Types: job:batch, job:pod, job:jobset, job:pytorch, job:tensorflow, job:mpi, job:paddle, job:xgboost, job:jax, job:train, job:ray, job:appwrapper
+##   Job Types: job:batch, job:pod, job:jobset, job:pytorch, job:tensorflow, job:mpi, job:paddle, job:xgboost, job:jax, job:train, job:ray, job:appwrapper, job:sparkapplication
 ##   Features: feature:tas, feature:multikueue, feature:provisioning, feature:fairsharing, feature:admissionfairsharing
 ##   Areas: area:core, area:jobs, area:admissionchecks, area:multikueue
 ##
@@ -95,12 +101,17 @@ test: gotestsum ## Run tests.
 
 .PHONY: test-integration
 test-integration: compile-crd-manifests envtest ginkgo dep-crds kueuectl ginkgo-top ## Run integration tests for all singlecluster suites.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
+	$(MAKE) test-integration-run
+
+.PHONY: test-integration-run
+test-integration-run:
+	KUBEBUILDER_ASSETS="$(KUBEBUILDER_ASSETS)" \
 	PROJECT_DIR=$(PROJECT_DIR)/ \
 	KUEUE_BIN=$(BIN_DIR) \
 	ENVTEST_K8S_VERSION=$(ENVTEST_K8S_VERSION) \
+	ARTIFACTS=$(ARTIFACTS) \
 	TEST_LOG_LEVEL=$(TEST_LOG_LEVEL) API_LOG_LEVEL=$(INTEGRATION_API_LOG_LEVEL) \
-	$(GINKGO) $(INTEGRATION_FILTERS) $(GINKGO_ARGS) $(GOFLAGS) -procs=$(INTEGRATION_NPROCS) --race --junit-report=junit.xml --json-report=integration.json --output-dir=$(ARTIFACTS) -v $(INTEGRATION_TARGET)
+	$(GINKGO) $(INTEGRATION_FILTERS) $(GINKGO_ARGS) $(GOFLAGS) -procs=$(INTEGRATION_NPROCS) --race --junit-report=integration-junit.xml --json-report=integration.json --output-dir=$(ARTIFACTS) -v $(INTEGRATION_TARGET)
 	$(BIN_DIR)/ginkgo-top -i $(ARTIFACTS)/integration.json > $(ARTIFACTS)/integration-top.yaml
 
 .PHONY: test-integration-baseline
@@ -113,10 +124,11 @@ test-integration-extended: test-integration ## Run extended integration tests fo
 
 .PHONY: test-multikueue-integration
 test-multikueue-integration: compile-crd-manifests envtest ginkgo dep-crds ginkgo-top ## Run integration tests for MultiKueue suite.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
+	KUBEBUILDER_ASSETS="$(KUBEBUILDER_ASSETS)" \
 	PROJECT_DIR=$(PROJECT_DIR)/ \
 	KUEUE_BIN=$(BIN_DIR) \
 	ENVTEST_K8S_VERSION=$(ENVTEST_K8S_VERSION) \
+	ARTIFACTS=$(ARTIFACTS) \
 	TEST_LOG_LEVEL=$(TEST_LOG_LEVEL) API_LOG_LEVEL=$(INTEGRATION_API_LOG_LEVEL) \
 	$(GINKGO) $(INTEGRATION_FILTERS) $(GINKGO_ARGS) $(GOFLAGS) -procs=$(INTEGRATION_NPROCS_MULTIKUEUE) --race --junit-report=multikueue-junit.xml --json-report=multikueue-integration.json --output-interceptor-mode=none --output-dir=$(ARTIFACTS) -v $(INTEGRATION_TARGET_MULTIKUEUE)
 	$(BIN_DIR)/ginkgo-top -i $(ARTIFACTS)/multikueue-integration.json > $(ARTIFACTS)/multikueue-integration-top.yaml
@@ -154,6 +166,13 @@ test-tas-e2e: setup-e2e-env kind-ray-project-mini-image-build run-test-tas-e2e-$
 test-tas-e2e-helm: E2E_USE_HELM=true
 test-tas-e2e-helm: test-tas-e2e
 
+## Label Taxonomy:
+##   Features: admissionfairsharing, certs, failurerecoverypolicy, managejobswithoutqueuename, localqueuemetrics, objectretentionpolicies, podintegrationautoenablement, reconcile, spark, visibility, waitforpodsready
+##
+## Examples:
+##   Run only Admission Fair Sharing tests: GINKGO_ARGS="--label-filter=feature:admissionfairsharing" make test-e2e-customconfigs
+##   Run only Certs tests: GINKGO_ARGS="--label-filter=feature:certs" make test-e2e-customconfigs
+##   Run only Failure Recovery Policy tests: GINKGO_ARGS="--label-filter=feature:failurerecoverypolicy" make test-e2e-customconfigs
 .PHONY: test-e2e-customconfigs
 test-e2e-customconfigs: setup-e2e-env run-test-e2e-customconfigs-$(E2E_KIND_VERSION:kindest/node:v%=%)
 
@@ -248,6 +267,7 @@ run-test-e2e-customconfigs-%:
 		KIND_CLUSTER_FILE="kind-cluster.yaml" E2E_TARGET_FOLDER="customconfigs" \
 		JOBSET_VERSION=$(JOBSET_VERSION) APPWRAPPER_VERSION=$(APPWRAPPER_VERSION) \
 		LEADERWORKERSET_VERSION=$(LEADERWORKERSET_VERSION) \
+		SPARKOPERATOR_VERSION=$(SPARKOPERATOR_VERSION) \
 		TEST_LOG_LEVEL=$(TEST_LOG_LEVEL) \
 		E2E_RUN_ONLY_ENV=$(E2E_RUN_ONLY_ENV) \
 		E2E_USE_HELM=$(E2E_USE_HELM) \
@@ -397,7 +417,7 @@ SCALABILITY_GENERATOR_CONFIG ?= $(PROJECT_DIR)/test/performance/scheduler/config
 .PHONY: run-performance-scheduler
 run-performance-scheduler: envtest performance-scheduler-runner minimalkueue
 	mkdir -p $(ARTIFACTS)
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
+	KUBEBUILDER_ASSETS="$(KUBEBUILDER_ASSETS)" \
 	$(SCALABILITY_RUNNER) \
 		--o $(ARTIFACTS) \
 		--crds=$(PROJECT_DIR)/config/components/crd/bases \
@@ -419,7 +439,7 @@ test-performance-scheduler:
 .PHONY: run-performance-scheduler-in-cluster
 run-performance-scheduler-in-cluster: envtest performance-scheduler-runner
 	mkdir -p "$(ARTIFACTS)/$@"
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
+	KUBEBUILDER_ASSETS="$(KUBEBUILDER_ASSETS)" \
 	$(SCALABILITY_RUNNER) \
 		--o "$(ARTIFACTS)/$@" \
 		--generatorConfig=$(SCALABILITY_GENERATOR_CONFIG) \
@@ -433,7 +453,7 @@ SCALABILITY_TAS_RANGE_FILE ?= $(PROJECT_DIR)/test/performance/scheduler/configs/
 .PHONY: run-tas-performance-scheduler
 run-tas-performance-scheduler: envtest performance-scheduler-runner minimalkueue
 	mkdir -p $(ARTIFACTS)
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
+	KUBEBUILDER_ASSETS="$(KUBEBUILDER_ASSETS)" \
 	$(SCALABILITY_RUNNER) \
 		--o $(ARTIFACTS) \
 		--crds=$(PROJECT_DIR)/config/components/crd/bases \
@@ -455,7 +475,7 @@ test-tas-performance-scheduler:
 .PHONY: run-tas-performance-scheduler-in-cluster
 run-tas-performance-scheduler-in-cluster: envtest performance-scheduler-runner
 	mkdir -p "$(ARTIFACTS)/$@"
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
+	KUBEBUILDER_ASSETS="$(KUBEBUILDER_ASSETS)" \
 	$(SCALABILITY_RUNNER) \
 		--o "$(ARTIFACTS)/$@" \
 		--generatorConfig=$(SCALABILITY_TAS_GENERATOR_CONFIG) \

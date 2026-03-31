@@ -12,7 +12,7 @@
 - [Design Details](#design-details)
   - [API Definition](#api-definition)
     - [Workload API](#workload-api)
-    - [<code>SingleClusterPreemptionTimeout</code> Configuration](#singleclusterpreemptiontimeout-configuration)
+    - [<code>SingleClusterPreemptionTimeout</code> Default](#singleclusterpreemptiontimeout-default)
   - [MultiKueue Controller](#multikueue-controller)
   - [Kueue Scheduler](#kueue-scheduler)
   - [Test Plan](#test-plan)
@@ -57,7 +57,8 @@ This can cause them to make decisions which make sense from a single cluster's p
 taking the whole system (other workers) into account.
 
 For example, a high-priority workload can trigger simultaneous preemptions in multiple worker clusters.
-For instance, a workload sent to three clusters using the `AllAtOnce` strategy might initiate preemptions on all three.
+For instance, a workload sent to three clusters using the `AllAtOnce` strategy might initiate preemptions on all three (although this is not
+specific to any one dispatch strategy and might occur as long as there is more than one nominated cluster).
 Since the workload can only be admitted to one cluster, the preemptions on the other two are unnecessary and lead to wasted resources by
 halting running workloads and then having to re-admit them.
 
@@ -115,7 +116,7 @@ The proposal is to preserve as much of the existing admission semantics as possi
 The controller responsible for dispatching workloads in MultiKueue will be responsible for adding the preemption gate to the workloads they manage.
 
 If a preemption fails for some reason or the workload is not admitted after preemption, a **timeout mechanism** will ensure that the gate is eventually removed for other replica workloads so that
-another worker gets a chance to preempt. If a worker was ungated, the `SingleClusterPreemptionTimeout` elapsed and the workload is still pending, another worker can be considered for ungating.
+another worker gets a chance to preempt. If a worker was ungated, the `SingleClusterPreemptionTimeout` (5 minutes by default) elapsed and the workload is still pending, another worker can be considered for ungating.
 This prevents a single failing preemption from blocking all others.
 
 ### User Stories
@@ -179,14 +180,14 @@ type WorkloadSpec struct {
   PreemptionGates []PreemptionGate `json:"preemptionGates,omitempty"`
 }
 
-type GateState string
+type PreemptionGatePosition string
 
 const (
-  // GateStateClosed means that the gate is blocking the workload from preempting.
-  GateStateClosed GateState = "Closed"
+  // PreemptionGatePositionClosed means that the gate is blocking the workload from preempting.
+  PreemptionGatePositionClosed PreemptionGatePosition = "Closed"
 
-  // GateStateOpen means that the gate is not blocking the workload from preempting.
-  GateStateOpen GateState = "Open"
+  // PreemptionGatePositionOpen means that the gate is not blocking the workload from preempting.
+  PreemptionGatePositionOpen PreemptionGatePosition = "Open"
 )
 
 type PreemptionGateState struct {
@@ -196,10 +197,10 @@ type PreemptionGateState struct {
   // +required
   Name string `json:"name"`
 
-  // state of the preemption gate. One of
+  // position of the preemption gate. One of
   // +kubebuilder:validation:Enum=Closed;Open
   // +required
-  State GateState `json:"state"`
+  Position PreemptionGatePosition `json:"position"`
 
   // lastTransitionTime is the last time the gate transitioned from one status to another.
   // +required
@@ -221,13 +222,13 @@ The `PreemptionGated` condition will be defined as follows:
 ```go
 const (
   ...
-  // WorkloadPreemptionBlocked means that the Workload attempted to reserve quota via a preemption, but was blocked.
+  // WorkloadBlockedOnPreemptionGates means that the Workload attempted to reserve quota via a preemption, but was blocked.
   // The possible reasons for this condition are:
-  // - "PreemptionGated": the workload could not preempt to acquire quota due to a preemption gate.
-  WorkloadPreemptionBlocked = "PreemptionBlocked"
+  // - "PreemptionGated": the preemptor workload could not preempt the preemption targets to acquire quota due to a preemption gate.
+  WorkloadBlockedOnPreemptionGates = "BlockedOnPreemptionGates"
 )
 
-// Reasons for the WorkloadPreemptionBlocked condition.
+// Reasons for the WorkloadBlockedOnPreemptionGates condition.
 const (
   // PreemptionGated indicates the Workload could free up quota via
   // preemption, but was prevented from doing so by a preemption gate.
@@ -251,25 +252,17 @@ The structure of the API is inspired both by the [`AdmissionCheckState` API](htt
 and the [`schedulingGate` API](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#podschedulinggate-v1-core) in the `Pod` spec.
 
 
-#### `SingleClusterPreemptionTimeout` Configuration
+#### `SingleClusterPreemptionTimeout` Default
 
-The `MultiKueue` field in the `Configuration` struct will be extended with a `SingleClusterPreemptionTimeout` that defines
-the timeout of preemption, after which another worker replica can be ungated, measured since the previous ungating
-of the workload.
-
-```go
-type MultiKueue struct {
-  // The timeout after which another worker cluster replica can be ungated, measured since the previous time a replica was ungated.
-  // Defaults to 5 minutes.
-  // +optional
-  SingleClusterPreemptionTimeout *metav1.Duration `json:"singleClusterPreemptionTimeout,omitempty"`
-}
-```
+In the alpha, a hard-coded default value of 5 minutes will be set for the `SingleClusterPreemptionTimeout`.
+This is done in anticipation of a new opt-in API in beta, in order to avoid locking into the wrong API structure in the alpha
+(see [Graduation Criteria](#graduation-criteria)).
 
 ### MultiKueue Controller
 
-When a workload is submitted to MultiKueue, its remote replicas will automatically be assigned the `kueue.x-k8s.io/multikueue` preemption gate
-via its `spec`. This will prevent any of the replicas from triggering a preemption until allowed by the manager controller.
+When a workload is submitted to MultiKueue, its remote replicas in the nominated clusters (irrespective of the nomination algorithm)
+will automatically be assigned the `kueue.x-k8s.io/multikueue` preemption gate via its `spec`.
+This will prevent any of the replicas from triggering a preemption until allowed by the manager controller.
 The `status` of the remote workloads will be updated with the `PreemptionGateState` by a workload controller running on the worker clusters.
 
 A manager-level preemption orchestration controller will be responsible for ungating the replicated workloads.
@@ -358,13 +351,12 @@ to implement this enhancement.
 
 The feature will be introduced behind a `MultiKueueOrchestratedPreemption` feature gate.
 
-The `SingleClusterPreemptionTimeout` will be configurable in the Kueue configuration.
-
 - **Alpha**:
   - Feature implemented behind the feature gate, disabled by default.
   - Unit and integration tests are implemented.
 - **Beta**:
   - Feature gate is enabled by default.
+  - An API to configure and explicitly opt-in to this feature is added (for example to `Configuration`).
   - The feature has been tested in a production-like environment.
   - User feedback was gathered and emerging use-cases are taken into consideration.
   - The Kueue APIs are finalized and potentially extended, based upon the alpha experience.

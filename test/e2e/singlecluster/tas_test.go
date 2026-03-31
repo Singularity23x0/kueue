@@ -23,7 +23,6 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -110,7 +109,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling", ginkgo.Label("area:singleclus
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.Get(ctx, wlLookupKey, createdWorkload)).Should(gomega.Succeed())
 					g.Expect(createdWorkload.Status.Admission).ShouldNot(gomega.BeNil())
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			// The job might have finished at this point. That shouldn't be a problem for the purpose of this test
@@ -143,7 +142,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling", ginkgo.Label("area:singleclus
 					g.Expect(k8sClient.Get(ctx, wlLookupKey, createdWorkload)).Should(gomega.Succeed())
 					g.Expect(workload.HasQuotaReservation(createdWorkload)).Should(gomega.BeTrue())
 					g.Expect(createdWorkload.Status.Conditions).Should(utiltesting.HaveConditionStatusTrue(kueue.WorkloadFinished))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 		})
 	})
@@ -230,7 +229,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling", ginkgo.Label("area:singleclus
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.Get(ctx, jobSetKey, jobSet)).To(gomega.Succeed())
 					g.Expect(jobSet.Spec.Suspend).Should(gomega.Equal(ptr.To(false)))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			ginkgo.By("verify the JobSet has nodeSelector set", func() {
@@ -248,7 +247,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling", ginkgo.Label("area:singleclus
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.Get(ctx, wlLookupKey, createdWorkload)).Should(gomega.Succeed())
 					g.Expect(createdWorkload.Status.Admission).ShouldNot(gomega.BeNil())
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 				gomega.Expect(createdWorkload.Status.Admission).ShouldNot(gomega.BeNil())
 				gomega.Expect(createdWorkload.Status.Admission.PodSetAssignments).Should(gomega.HaveLen(2))
 				gomega.Expect(createdWorkload.Status.Admission.PodSetAssignments[0].TopologyAssignment).Should(gomega.BeComparableTo(
@@ -276,7 +275,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling", ginkgo.Label("area:singleclus
 					g.Expect(k8sClient.Get(ctx, wlLookupKey, createdWorkload)).Should(gomega.Succeed())
 					g.Expect(workload.HasQuotaReservation(createdWorkload)).Should(gomega.BeTrue())
 					g.Expect(createdWorkload.Status.Conditions).Should(utiltesting.HaveConditionStatusTrue(kueue.WorkloadFinished))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 		})
 	})
@@ -346,7 +345,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling", ginkgo.Label("area:singleclus
 						"instance-type":      "on-demand",
 						corev1.LabelHostname: "kind-worker",
 					}))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			wlLookupKey := types.NamespacedName{Name: podcontroller.GetWorkloadNameForPod(p.Name, p.UID), Namespace: ns.Name}
@@ -356,7 +355,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling", ginkgo.Label("area:singleclus
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.Get(ctx, wlLookupKey, createdWorkload)).Should(gomega.Succeed())
 					g.Expect(createdWorkload.Status.Admission).ShouldNot(gomega.BeNil())
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 				gomega.Expect(createdWorkload.Status.Admission).ShouldNot(gomega.BeNil())
 				gomega.Expect(createdWorkload.Status.Admission.PodSetAssignments).Should(gomega.HaveLen(1))
 				gomega.Expect(createdWorkload.Status.Admission.PodSetAssignments[0].TopologyAssignment).Should(gomega.BeComparableTo(
@@ -375,7 +374,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling", ginkgo.Label("area:singleclus
 					g.Expect(k8sClient.Get(ctx, wlLookupKey, createdWorkload)).Should(gomega.Succeed())
 					g.Expect(workload.HasQuotaReservation(createdWorkload)).Should(gomega.BeTrue())
 					g.Expect(createdWorkload.Status.Conditions).Should(utiltesting.HaveConditionStatusTrue(kueue.WorkloadFinished))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 		})
 
@@ -410,7 +409,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling", ginkgo.Label("area:singleclus
 							corev1.LabelHostname: "kind-worker",
 						}))
 					}
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			wlLookupKey := client.ObjectKey{Namespace: ns.Name, Name: "group"}
@@ -439,7 +438,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling", ginkgo.Label("area:singleclus
 					g.Expect(k8sClient.Get(ctx, wlLookupKey, createdWorkload)).Should(gomega.Succeed())
 					g.Expect(workload.HasQuotaReservation(createdWorkload)).Should(gomega.BeTrue())
 					g.Expect(createdWorkload.Status.Conditions).Should(utiltesting.HaveConditionStatusTrue(kueue.WorkloadFinished))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 		})
 	})
@@ -493,15 +492,14 @@ var _ = ginkgo.Describe("TopologyAwareScheduling", ginkgo.Label("area:singleclus
 				TrainerImage(util.GetAgnHostImage(), []string{"/agnhost"}, util.BehaviorExitFast).
 				TrainerRequest(corev1.ResourceCPU, "500m").
 				TrainerRequest(corev1.ResourceMemory, "200Mi").
-				PodTemplateOverrides([]kftrainerapi.PodTemplateOverride{
-					{
-						TargetJobs: []kftrainerapi.PodTemplateOverrideTargetJob{
-							{Name: "node"},
-						},
-						Metadata: &metav1.ObjectMeta{
-							Annotations: map[string]string{kueue.PodSetRequiredTopologyAnnotation: corev1.LabelHostname},
-						},
-					},
+				RuntimePatches([]kftrainerapi.RuntimePatch{
+					testingtrainjob.MakeRuntimePatch("test-e2e/tas").
+						ReplicatedJobs(
+							testingtrainjob.MakeReplicatedJobPatch("node").
+								PodAnnotation(kueue.PodSetRequiredTopologyAnnotation, corev1.LabelHostname).
+								Obj(),
+						).
+						Obj(),
 				}).
 				Obj()
 
@@ -514,12 +512,15 @@ var _ = ginkgo.Describe("TopologyAwareScheduling", ginkgo.Label("area:singleclus
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.Get(ctx, trainjobKey, trainjob)).To(gomega.Succeed())
 					g.Expect(trainjob.Spec.Suspend).Should(gomega.Equal(ptr.To(false)))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
-			ginkgo.By("verify the TrainJob has nodeSelector set", func() {
-				gomega.Expect(trainjob.Spec.PodTemplateOverrides).To(gomega.HaveLen(2))
-				gomega.Expect(trainjob.Spec.PodTemplateOverrides[1].Spec.NodeSelector).To(gomega.Equal(
+			ginkgo.By("Verify that the trainjob has a runtime patch from kueue", func() {
+				kueueRuntimePatch := testingtrainjob.KueueRuntimePatch(trainjob)
+				gomega.Expect(kueueRuntimePatch).ToNot(gomega.BeNil())
+				rJobs := kueueRuntimePatch.TrainingRuntimeSpec.Template.Spec.ReplicatedJobs
+				gomega.Expect(rJobs).To(gomega.HaveLen(1))
+				gomega.Expect(rJobs[0].Template.Spec.Template.Spec.NodeSelector).To(gomega.Equal(
 					map[string]string{
 						"instance-type": "on-demand",
 					},
@@ -533,7 +534,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling", ginkgo.Label("area:singleclus
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.Get(ctx, wlLookupKey, createdWorkload)).Should(gomega.Succeed())
 					g.Expect(createdWorkload.Status.Admission).ShouldNot(gomega.BeNil())
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 				gomega.Expect(createdWorkload.Status.Admission).ShouldNot(gomega.BeNil())
 				gomega.Expect(createdWorkload.Status.Admission.PodSetAssignments).Should(gomega.HaveLen(1))
 				gomega.Expect(createdWorkload.Status.Admission.PodSetAssignments[0].TopologyAssignment).Should(gomega.BeComparableTo(
@@ -552,7 +553,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling", ginkgo.Label("area:singleclus
 					g.Expect(k8sClient.Get(ctx, wlLookupKey, createdWorkload)).Should(gomega.Succeed())
 					g.Expect(workload.HasQuotaReservation(createdWorkload)).Should(gomega.BeTrue())
 					g.Expect(createdWorkload.Status.Conditions).Should(utiltesting.HaveConditionStatusTrue(kueue.WorkloadFinished))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 		})
 	})
@@ -622,7 +623,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling", ginkgo.Label("area:singleclus
 					g.Expect(createdWorkload.Status.Admission).ShouldNot(gomega.BeNil())
 					g.Expect(createdWorkload.Status.Admission.PodSetAssignments).Should(gomega.HaveLen(1))
 					g.Expect(createdWorkload.Status.Admission.PodSetAssignments[0].TopologyAssignment).ShouldNot(gomega.BeNil())
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 
 				ta := tas.InternalFrom(createdWorkload.Status.Admission.PodSetAssignments[0].TopologyAssignment)
 				gomega.Expect(ta.Domains).ShouldNot(gomega.BeEmpty())
@@ -647,7 +648,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling", ginkgo.Label("area:singleclus
 					g.Expect(scaledWorkload.Status.Admission).ShouldNot(gomega.BeNil())
 					g.Expect(scaledWorkload.Spec.PodSets).Should(gomega.HaveLen(1))
 					g.Expect(scaledWorkload.Spec.PodSets[0].Count).Should(gomega.Equal(scaledParallelism))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 
 				ta := tas.InternalFrom(scaledWorkload.Status.Admission.PodSetAssignments[0].TopologyAssignment)
 				gomega.Expect(ta).ShouldNot(gomega.BeNil())

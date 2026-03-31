@@ -11,11 +11,29 @@
     lockToDefault: false
     preRelease: Beta
     version: "0.15"
+- name: AdmissionGatedBy
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "0.17"
 - name: AssignQueueLabelsForPods
   versionedSpecs:
   - default: true
     lockToDefault: false
     preRelease: Beta
+    version: "0.17"
+- name: CustomMetricLabels
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "0.17"
+- name: DRAExtendedResources
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
     version: "0.17"
 - name: DynamicResourceAllocation
   versionedSpecs:
@@ -52,6 +70,12 @@
   - default: true
     lockToDefault: false
     preRelease: Beta
+    version: "0.17"
+- name: FastQuotaReleaseInPodIntegration
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
     version: "0.17"
 - name: FlavorFungibility
   versionedSpecs:
@@ -103,6 +127,10 @@
     lockToDefault: false
     preRelease: Alpha
     version: "0.10"
+  - default: true
+    lockToDefault: false
+    preRelease: Beta
+    version: "0.17"
 - name: ManagedJobsNamespaceSelectorAlwaysRespected
   versionedSpecs:
   - default: false
@@ -163,6 +191,12 @@
     lockToDefault: false
     preRelease: Alpha
     version: "0.15"
+- name: MultiKueueOrchestratedPreemption
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "0.17"
 - name: MultiKueueRedoAdmissionOnEvictionInWorker
   versionedSpecs:
   - default: true
@@ -199,6 +233,12 @@
     lockToDefault: false
     preRelease: Beta
     version: "0.5"
+- name: PriorityBoost
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "0.17"
 - name: PrioritySortingWithinCohort
   versionedSpecs:
   - default: true
@@ -237,11 +277,29 @@
     lockToDefault: true
     preRelease: GA
     version: "0.17"
+- name: SchedulerLongRequeueInterval
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "0.17"
+- name: SchedulerTimestampPreemptionBuffer
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "0.17"
 - name: SchedulingEquivalenceHashing
   versionedSpecs:
-  - default: true
+  - default: false
     lockToDefault: false
     preRelease: Beta
+    version: "0.17"
+- name: ShortWorkloadNames
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
     version: "0.17"
 - name: SkipFinalizersForPodsSuspendedByParent
   versionedSpecs:
@@ -249,6 +307,12 @@
     lockToDefault: false
     preRelease: Beta
     version: "0.16"
+- name: SparkApplicationIntegration
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "0.17"
 - name: TASBalancedPlacement
   versionedSpecs:
   - default: false

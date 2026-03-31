@@ -78,6 +78,11 @@ var _ = ginkgo.AfterSuite(func() {
 	fwk.Teardown()
 })
 
+var _ = ginkgo.ReportAfterSuite("Generate JUnit Report", func(report ginkgo.Report) {
+	err := util.ConfigureSuiteReporting(report)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+})
+
 func managerSetup(resourceTransformations ...config.ResourceTransformation) func(ctx context.Context, mgr manager.Manager) {
 	return func(ctx context.Context, mgr manager.Manager) {
 		err := indexer.Setup(ctx, mgr.GetFieldIndexer())
@@ -96,14 +101,15 @@ func managerSetup(resourceTransformations ...config.ResourceTransformation) func
 			schdcache.WithResourceTransformations(resourceTransformations),
 		}
 		cCache := schdcache.New(mgr.GetClient(), cacheOptions...)
+		preemptionExpectations := preemptexpectations.New()
 		queueOptions := []qcache.Option{
 			qcache.WithResourceTransformations(resourceTransformations),
+			qcache.WithPreemptionExpectations(preemptionExpectations),
 		}
 		queues := util.NewManagerForIntegrationTests(ctx, mgr.GetClient(), cCache, queueOptions...)
 		qManager = queues
 
-		preemptionExpectations := preemptexpectations.New()
-		failedCtrl, err := core.SetupControllers(mgr, queues, cCache, controllersCfg, nil, preemptionExpectations)
+		failedCtrl, err := core.SetupControllers(mgr, queues, cCache, controllersCfg, nil, preemptionExpectations, nil)
 		gomega.Expect(err).ToNot(gomega.HaveOccurred(), "Core controller", failedCtrl)
 
 		failedCtrl, err = tas.SetupControllers(mgr, queues, cCache, controllersCfg, nil)
@@ -111,7 +117,6 @@ func managerSetup(resourceTransformations ...config.ResourceTransformation) func
 
 		err = pod.SetupWebhook(mgr, jobframework.WithQueues(queues))
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
 		err = tasindexer.SetupIndexes(ctx, mgr.GetFieldIndexer())
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 

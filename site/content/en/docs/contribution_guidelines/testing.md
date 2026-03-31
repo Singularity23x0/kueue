@@ -179,7 +179,7 @@ Integration tests are labeled by controller, job type, feature, and area to enab
 
 **Label Taxonomy:**
 - Controllers: `controller:workload`, `controller:localqueue`, `controller:clusterqueue`, `controller:admissioncheck`, `controller:resourceflavor`, `controller:provisioning`
-- Job Types: `job:batch`, `job:pod`, `job:jobset`, `job:pytorch`, `job:tensorflow`, `job:mpi`, `job:paddle`, `job:xgboost`, `job:jax`, `job:train`, `job:ray`, `job:appwrapper`
+- Job Types: `job:batch`, `job:pod`, `job:jobset`, `job:pytorch`, `job:tensorflow`, `job:mpi`, `job:paddle`, `job:xgboost`, `job:jax`, `job:train`, `job:ray`, `job:appwrapper`, `job:sparkapplication`
 - Features: `feature:tas`, `feature:multikueue`, `feature:provisioning`, `feature:fairsharing`, `feature:admissionfairsharing`
 - Areas: `area:core`, `area:jobs`, `area:admissionchecks`, `area:multikueue`
 
@@ -223,6 +223,18 @@ GINKGO_ARGS="--label-filter=feature:deployment" make test-e2e-helm
 
 # Run only jobset and trainjob tests with helm
 GINKGO_ARGS="--label-filter=feature:jobset,feature:trainjob" make test-e2e
+```
+
+### Use label filters for e2e customconfigs tests
+CustomConfigs tests are labeled by feature. You can use `GINKGO_ARGS` with `--label-filter` to run specific tests:
+
+**Label Taxonomy:**
+- Features: `admissionfairsharing, certs, failurerecoverypolicy, managejobswithoutqueuename, localqueuemetrics, objectretentionpolicies, podintegrationautoenablement, reconcile, spark, visibility, waitforpodsready`
+
+**Examples:**
+```shell
+# Run only admissionfairsharing tests
+GINKGO_ARGS="--label-filter=feature:admissionfairsharing" make test-e2e-customconfigs
 ```
 
 ### Use Ginkgo --focus arg

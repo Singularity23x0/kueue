@@ -3029,9 +3029,7 @@ func TestScheduleForTAS(t *testing.T) {
 		for _, enabled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch enabled: %t", name, enabled), func(t *testing.T) {
 				features.SetFeatureGateDuringTest(t, features.WorkloadRequestUseMergePatch, enabled)
-				for fg, enable := range tc.featureGates {
-					features.SetFeatureGateDuringTest(t, fg, enable)
-				}
+				features.SetFeatureGatesDuringTest(t, tc.featureGates)
 				ctx, log := utiltesting.ContextWithLog(t)
 				testWls := make([]kueue.Workload, 0, len(tc.workloads))
 				for _, wl := range tc.workloads {
@@ -3264,6 +3262,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 						Obj()).
 					Obj(),
 				*utiltestingapi.MakeWorkload("low-priority-admitted", "default").
+					UID("low-priority-admitted-uid").
 					Queue("tas-main").
 					Priority(1).
 					ReserveQuotaAt(
@@ -3309,6 +3308,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 					}).
 					Obj(),
 				*utiltestingapi.MakeWorkload("low-priority-admitted", "default").
+					UID("low-priority-admitted-uid").
 					Queue("tas-main").
 					Priority(1).
 					ReserveQuotaAt(
@@ -3352,7 +3352,10 @@ func TestScheduleForTASPreemption(t *testing.T) {
 					Message("Preempted to accommodate a workload (UID: wl-foo, JobUID: job-foo) due to prioritization in the ClusterQueue; preemptor path: /tas-main; preemptee path: /tas-main").
 					Obj(),
 				utiltesting.MakeEventRecord("default", "low-priority-admitted", "Preempted", "Normal").
-					Message("Preempted to accommodate a workload (UID: wl-foo, JobUID: job-foo) due to prioritization in the ClusterQueue; preemptor path: /tas-main; preemptee path: /tas-main").
+					Message("Preempted to accommodate a workload (UID: wl-foo, JobUID: job-foo) due to prioritization in the ClusterQueue; preemptor path: /tas-main; preemptee path: /tas-main; preemptor effective priority: 3 (base: 3, boost: 0); preemptee effective priority: 1 (base: 1, boost: 0)").
+					Obj(),
+				utiltesting.MakeEventRecord("default", "foo", "PreemptedWorkload", "Normal").
+					Message("Preempted workload default/low-priority-admitted (UID: low-priority-admitted-uid) in ClusterQueue tas-main; preemptor effective priority: 3 (base: 3, boost: 0); preemptee effective priority: 1 (base: 1, boost: 0)").
 					Obj(),
 				utiltesting.MakeEventRecord("default", "foo", "Pending", "Warning").
 					Message(`couldn't assign flavors to pod set one: insufficient unused quota for cpu in flavor tas-default, 5 more needed. Pending the preemption of 1 workload(s)`).
@@ -3379,6 +3382,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 						Obj()).
 					Obj(),
 				*utiltestingapi.MakeWorkload("low-priority-admitted", "default").
+					UID("low-priority-admitted-uid").
 					Queue("tas-main").
 					Priority(1).
 					ReserveQuotaAt(
@@ -3428,6 +3432,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 					}).
 					Obj(),
 				*utiltestingapi.MakeWorkload("low-priority-admitted", "default").
+					UID("low-priority-admitted-uid").
 					Queue("tas-main").
 					Priority(1).
 					ReserveQuotaAt(
@@ -3473,7 +3478,10 @@ func TestScheduleForTASPreemption(t *testing.T) {
 					Message("Preempted to accommodate a workload (UID: wl-foo, JobUID: job-foo) due to prioritization in the ClusterQueue; preemptor path: /tas-main; preemptee path: /tas-main").
 					Obj(),
 				utiltesting.MakeEventRecord("default", "low-priority-admitted", "Preempted", "Normal").
-					Message("Preempted to accommodate a workload (UID: wl-foo, JobUID: job-foo) due to prioritization in the ClusterQueue; preemptor path: /tas-main; preemptee path: /tas-main").
+					Message("Preempted to accommodate a workload (UID: wl-foo, JobUID: job-foo) due to prioritization in the ClusterQueue; preemptor path: /tas-main; preemptee path: /tas-main; preemptor effective priority: 3 (base: 3, boost: 0); preemptee effective priority: 1 (base: 1, boost: 0)").
+					Obj(),
+				utiltesting.MakeEventRecord("default", "foo", "PreemptedWorkload", "Normal").
+					Message("Preempted workload default/low-priority-admitted (UID: low-priority-admitted-uid) in ClusterQueue tas-main; preemptor effective priority: 3 (base: 3, boost: 0); preemptee effective priority: 1 (base: 1, boost: 0)").
 					Obj(),
 				utiltesting.MakeEventRecord("default", "foo", "Pending", "Warning").
 					Message(`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "memory": 1. Pending the preemption of 1 workload(s)`).
@@ -3499,6 +3507,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 						Obj()).
 					Obj(),
 				*utiltestingapi.MakeWorkload("low-priority-admitted", "default").
+					UID("low-priority-admitted-uid").
 					Queue("tas-main").
 					Priority(1).
 					ReserveQuotaAt(
@@ -3544,6 +3553,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 					}).
 					Obj(),
 				*utiltestingapi.MakeWorkload("low-priority-admitted", "default").
+					UID("low-priority-admitted-uid").
 					Queue("tas-main").
 					Priority(1).
 					ReserveQuotaAt(
@@ -3587,7 +3597,10 @@ func TestScheduleForTASPreemption(t *testing.T) {
 					Message("Preempted to accommodate a workload (UID: wl-foo, JobUID: job-foo) due to prioritization in the ClusterQueue; preemptor path: /tas-main; preemptee path: /tas-main").
 					Obj(),
 				utiltesting.MakeEventRecord("default", "low-priority-admitted", "Preempted", "Normal").
-					Message("Preempted to accommodate a workload (UID: wl-foo, JobUID: job-foo) due to prioritization in the ClusterQueue; preemptor path: /tas-main; preemptee path: /tas-main").
+					Message("Preempted to accommodate a workload (UID: wl-foo, JobUID: job-foo) due to prioritization in the ClusterQueue; preemptor path: /tas-main; preemptee path: /tas-main; preemptor effective priority: 3 (base: 3, boost: 0); preemptee effective priority: 1 (base: 1, boost: 0)").
+					Obj(),
+				utiltesting.MakeEventRecord("default", "foo", "PreemptedWorkload", "Normal").
+					Message("Preempted workload default/low-priority-admitted (UID: low-priority-admitted-uid) in ClusterQueue tas-main; preemptor effective priority: 3 (base: 3, boost: 0); preemptee effective priority: 1 (base: 1, boost: 0)").
 					Obj(),
 				utiltesting.MakeEventRecord("default", "foo", "Pending", "Warning").
 					Message(`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1. Pending the preemption of 1 workload(s)`).
@@ -3617,6 +3630,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 						Obj()).
 					Obj(),
 				*utiltestingapi.MakeWorkload("low-priority-admitted", "default").
+					UID("low-priority-admitted-uid").
 					Queue("tas-main").
 					Priority(1).
 					ReserveQuotaAt(
@@ -3662,6 +3676,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 					}).
 					Obj(),
 				*utiltestingapi.MakeWorkload("low-priority-admitted", "default").
+					UID("low-priority-admitted-uid").
 					Queue("tas-main").
 					Priority(1).
 					ReserveQuotaAt(
@@ -3705,7 +3720,10 @@ func TestScheduleForTASPreemption(t *testing.T) {
 					Message("Preempted to accommodate a workload (UID: wl-high-priority-waiting, JobUID: job-high-priority-waiting) due to prioritization in the ClusterQueue; preemptor path: /tas-main; preemptee path: /tas-main").
 					Obj(),
 				utiltesting.MakeEventRecord("default", "low-priority-admitted", "Preempted", "Normal").
-					Message("Preempted to accommodate a workload (UID: wl-high-priority-waiting, JobUID: job-high-priority-waiting) due to prioritization in the ClusterQueue; preemptor path: /tas-main; preemptee path: /tas-main").
+					Message("Preempted to accommodate a workload (UID: wl-high-priority-waiting, JobUID: job-high-priority-waiting) due to prioritization in the ClusterQueue; preemptor path: /tas-main; preemptee path: /tas-main; preemptor effective priority: 3 (base: 3, boost: 0); preemptee effective priority: 1 (base: 1, boost: 0)").
+					Obj(),
+				utiltesting.MakeEventRecord("default", "high-priority-waiting", "PreemptedWorkload", "Normal").
+					Message("Preempted workload default/low-priority-admitted (UID: low-priority-admitted-uid) in ClusterQueue tas-main; preemptor effective priority: 3 (base: 3, boost: 0); preemptee effective priority: 1 (base: 1, boost: 0)").
 					Obj(),
 				utiltesting.MakeEventRecord("default", "high-priority-waiting", "Pending", "Warning").
 					Message(`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1. Pending the preemption of 1 workload(s)`).
@@ -3751,6 +3769,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 						Obj()).
 					Obj(),
 				*utiltestingapi.MakeWorkload("low-priority-admitted", "default").
+					UID("low-priority-admitted-uid").
 					Queue("tas-main").
 					Priority(1).
 					ReserveQuotaAt(
@@ -3796,6 +3815,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 					}).
 					Obj(),
 				*utiltestingapi.MakeWorkload("low-priority-admitted", "default").
+					UID("low-priority-admitted-uid").
 					Queue("tas-main").
 					Priority(1).
 					ReserveQuotaAt(
@@ -3859,7 +3879,10 @@ func TestScheduleForTASPreemption(t *testing.T) {
 					Message("Preempted to accommodate a workload (UID: wl-foo, JobUID: job-foo) due to prioritization in the ClusterQueue; preemptor path: /tas-main; preemptee path: /tas-main").
 					Obj(),
 				utiltesting.MakeEventRecord("default", "low-priority-admitted", "Preempted", "Normal").
-					Message("Preempted to accommodate a workload (UID: wl-foo, JobUID: job-foo) due to prioritization in the ClusterQueue; preemptor path: /tas-main; preemptee path: /tas-main").
+					Message("Preempted to accommodate a workload (UID: wl-foo, JobUID: job-foo) due to prioritization in the ClusterQueue; preemptor path: /tas-main; preemptee path: /tas-main; preemptor effective priority: 3 (base: 3, boost: 0); preemptee effective priority: 1 (base: 1, boost: 0)").
+					Obj(),
+				utiltesting.MakeEventRecord("default", "foo", "PreemptedWorkload", "Normal").
+					Message("Preempted workload default/low-priority-admitted (UID: low-priority-admitted-uid) in ClusterQueue tas-main; preemptor effective priority: 3 (base: 3, boost: 0); preemptee effective priority: 1 (base: 1, boost: 0)").
 					Obj(),
 				utiltesting.MakeEventRecord("default", "foo", "Pending", "Warning").
 					Message(`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1. Pending the preemption of 1 workload(s)`).
@@ -3907,6 +3930,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 						Obj()).
 					Obj(),
 				*utiltestingapi.MakeWorkload("low-priority-admitted", "default").
+					UID("low-priority-admitted-uid").
 					Queue("tas-main").
 					Priority(1).
 					ReserveQuotaAt(
@@ -3952,6 +3976,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 					}).
 					Obj(),
 				*utiltestingapi.MakeWorkload("low-priority-admitted", "default").
+					UID("low-priority-admitted-uid").
 					Queue("tas-main").
 					Priority(1).
 					ReserveQuotaAt(
@@ -4015,7 +4040,10 @@ func TestScheduleForTASPreemption(t *testing.T) {
 					Message("Preempted to accommodate a workload (UID: wl-foo, JobUID: job-foo) due to prioritization in the ClusterQueue; preemptor path: /tas-main; preemptee path: /tas-main").
 					Obj(),
 				utiltesting.MakeEventRecord("default", "low-priority-admitted", "Preempted", "Normal").
-					Message("Preempted to accommodate a workload (UID: wl-foo, JobUID: job-foo) due to prioritization in the ClusterQueue; preemptor path: /tas-main; preemptee path: /tas-main").
+					Message("Preempted to accommodate a workload (UID: wl-foo, JobUID: job-foo) due to prioritization in the ClusterQueue; preemptor path: /tas-main; preemptee path: /tas-main; preemptor effective priority: 3 (base: 3, boost: 0); preemptee effective priority: 1 (base: 1, boost: 0)").
+					Obj(),
+				utiltesting.MakeEventRecord("default", "foo", "PreemptedWorkload", "Normal").
+					Message("Preempted workload default/low-priority-admitted (UID: low-priority-admitted-uid) in ClusterQueue tas-main; preemptor effective priority: 3 (base: 3, boost: 0); preemptee effective priority: 1 (base: 1, boost: 0)").
 					Obj(),
 				utiltesting.MakeEventRecord("default", "foo", "Pending", "Warning").
 					Message(`couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 1 out of 2 pod(s). Pending the preemption of 1 workload(s)`).
@@ -4252,15 +4280,10 @@ func TestScheduleForTASPreemption(t *testing.T) {
 			wantInadmissibleLeft: nil,
 			eventCmpOpts:         cmp.Options{eventIgnoreMessage},
 			wantEvents: []utiltesting.EventRecord{
-				utiltesting.MakeEventRecord("default", "low-priority", "EvictedDueToPreempted", "Normal").
-					Message("Preempted to accommodate a workload (UID: wl-high-priority, JobUID: job-high-priority) due to prioritization in the ClusterQueue; preemptor path: /tas-main; preemptee path: /tas-main").
-					Obj(),
-				utiltesting.MakeEventRecord("default", "low-priority", "Preempted", "Normal").
-					Message("Preempted to accommodate a workload (UID: wl-high-priority, JobUID: job-high-priority) due to prioritization in the ClusterQueue; preemptor path: /tas-main; preemptee path: /tas-main").
-					Obj(),
-				utiltesting.MakeEventRecord("default", "high-priority", "Pending", "Warning").
-					Message("couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor tas-default, 3 more needed. Pending the preemption of 1 workload(s)").
-					Obj(),
+				utiltesting.MakeEventRecord("default", "low-priority", "EvictedDueToPreempted", "Normal").Obj(),
+				utiltesting.MakeEventRecord("default", "low-priority", "Preempted", "Normal").Obj(),
+				utiltesting.MakeEventRecord("default", "high-priority", "PreemptedWorkload", "Normal").Obj(),
+				utiltesting.MakeEventRecord("default", "high-priority", "Pending", "Warning").Obj(),
 			},
 			featureGates: map[featuregate.Feature]bool{
 				features.TopologyAwareScheduling: false,
@@ -4271,9 +4294,8 @@ func TestScheduleForTASPreemption(t *testing.T) {
 		for _, enabled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch enabled: %t", name, enabled), func(t *testing.T) {
 				features.SetFeatureGateDuringTest(t, features.WorkloadRequestUseMergePatch, enabled)
-				for feature, value := range tc.featureGates {
-					features.SetFeatureGateDuringTest(t, feature, value)
-				}
+				features.SetFeatureGatesDuringTest(t, tc.featureGates)
+
 				ctx, log := utiltesting.ContextWithLog(t)
 				testWls := make([]kueue.Workload, 0, len(tc.workloads))
 				for _, wl := range tc.workloads {
@@ -4468,6 +4490,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 		nodes           []corev1.Node
 		pods            []corev1.Pod
 		topologies      []kueue.Topology
+		cohorts         []kueue.Cohort
 		resourceFlavors []kueue.ResourceFlavor
 		clusterQueues   []kueue.ClusterQueue
 		workloads       []kueue.Workload
@@ -4656,6 +4679,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			wantEvents: []utiltesting.EventRecord{
 				utiltesting.MakeEventRecord("default", "b1", "Pending", corev1.EventTypeWarning).Obj(),
 				utiltesting.MakeEventRecord("default", "a1-admitted", "Preempted", corev1.EventTypeNormal).Obj(),
+				utiltesting.MakeEventRecord("default", "b1", "PreemptedWorkload", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "a1-admitted", "EvictedDueToPreempted", corev1.EventTypeNormal).Obj(),
 			},
 		},
@@ -4850,6 +4874,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			wantEvents: []utiltesting.EventRecord{
 				utiltesting.MakeEventRecord("default", "a1-admitted", "EvictedDueToPreempted", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "a1-admitted", "Preempted", corev1.EventTypeNormal).Obj(),
+				utiltesting.MakeEventRecord("default", "b1", "PreemptedWorkload", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "b1", "Pending", corev1.EventTypeWarning).Obj(),
 			},
 		},
@@ -5010,6 +5035,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			wantEvents: []utiltesting.EventRecord{
 				utiltesting.MakeEventRecord("default", "a2-admitted", "EvictedDueToPreempted", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "a2-admitted", "Preempted", corev1.EventTypeNormal).Obj(),
+				utiltesting.MakeEventRecord("default", "b1", "PreemptedWorkload", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "b1", "Pending", corev1.EventTypeWarning).Obj(),
 			},
 		},
@@ -5253,6 +5279,8 @@ func TestScheduleForTASCohorts(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "c1", "Pending", corev1.EventTypeWarning).Obj(),
 				utiltesting.MakeEventRecord("default", "a2-admitted", "Preempted", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "a3-admitted", "Preempted", corev1.EventTypeNormal).Obj(),
+				utiltesting.MakeEventRecord("default", "b1", "PreemptedWorkload", corev1.EventTypeNormal).Obj(),
+				utiltesting.MakeEventRecord("default", "b1", "PreemptedWorkload", corev1.EventTypeNormal).Obj(),
 			},
 		},
 		"two small workloads considered; both get scheduled on different nodes": {
@@ -5939,6 +5967,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			eventCmpOpts: cmp.Options{eventIgnoreMessage},
 			wantEvents: []utiltesting.EventRecord{
 				utiltesting.MakeEventRecord("default", "a1-admitted", "EvictedDueToPreempted", corev1.EventTypeNormal).Obj(),
+				utiltesting.MakeEventRecord("default", "a2", "PreemptedWorkload", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "a2", "Pending", corev1.EventTypeWarning).Obj(),
 				utiltesting.MakeEventRecord("default", "a1-admitted", "Preempted", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "b1", "Pending", corev1.EventTypeWarning).Obj(),
@@ -6227,6 +6256,238 @@ func TestScheduleForTASCohorts(t *testing.T) {
 					Obj(),
 			},
 		},
+		"preempt in multiple flavors out of which one requires update Fit -> Preempt due to fragmentation": {
+			nodes: []corev1.Node{
+				*testingnode.MakeNode("node-1").
+					Label("tas-node", "true").
+					Label(corev1.LabelHostname, "node-1").
+					StatusAllocatable(corev1.ResourceList{
+						corev1.ResourceCPU:  resource.MustParse("8"),
+						"example.com/gpu":   resource.MustParse("8"),
+						corev1.ResourcePods: resource.MustParse("10"),
+					}).
+					Ready().
+					Obj(),
+				*testingnode.MakeNode("node-2").
+					Label("tas-node", "true").
+					Label(corev1.LabelHostname, "node-2").
+					StatusAllocatable(corev1.ResourceList{
+						corev1.ResourceCPU:  resource.MustParse("8"),
+						"example.com/gpu":   resource.MustParse("8"),
+						corev1.ResourcePods: resource.MustParse("10"),
+					}).
+					Ready().
+					Obj(),
+			},
+			cohorts: []kueue.Cohort{
+				*utiltestingapi.MakeCohort("tas-cohort-main").
+					ResourceGroup(
+						*utiltestingapi.MakeFlavorQuotas("tas-default").
+							Resource(corev1.ResourceCPU, "16").
+							Resource("example.com/gpu", "16").
+							Obj(),
+					).
+					Obj(),
+			},
+			topologies: []kueue.Topology{
+				*utiltestingapi.MakeTopology("tas-topology").Levels(corev1.LabelHostname).Obj(),
+			},
+			resourceFlavors: []kueue.ResourceFlavor{
+				*utiltestingapi.MakeResourceFlavor("tas-default").
+					NodeLabel("tas-node", "true").
+					TopologyName("tas-topology").
+					Obj(),
+			},
+			clusterQueues: []kueue.ClusterQueue{
+				*utiltestingapi.MakeClusterQueue("tas-cq-a").
+					Cohort("tas-cohort-main").
+					ResourceGroup(
+						*utiltestingapi.MakeFlavorQuotas("tas-default").
+							ResourceQuotaWrapper(corev1.ResourceCPU).NominalQuota("0").BorrowingLimit("16").Append().
+							ResourceQuotaWrapper("example.com/gpu").NominalQuota("0").BorrowingLimit("16").Append().
+							Obj(),
+					).
+					Preemption(kueue.ClusterQueuePreemption{
+						ReclaimWithinCohort: kueue.PreemptionPolicyAny,
+						WithinClusterQueue:  kueue.PreemptionPolicyLowerPriority,
+						BorrowWithinCohort: &kueue.BorrowWithinCohort{
+							Policy: kueue.BorrowWithinCohortPolicyLowerPriority,
+						},
+					}).
+					Obj(),
+				*utiltestingapi.MakeClusterQueue("tas-cq-b").
+					Cohort("tas-cohort-main").
+					ResourceGroup(
+						*utiltestingapi.MakeFlavorQuotas("tas-default").
+							ResourceQuotaWrapper(corev1.ResourceCPU).NominalQuota("0").BorrowingLimit("16").Append().
+							ResourceQuotaWrapper("example.com/gpu").NominalQuota("0").BorrowingLimit("16").Append().
+							Obj(),
+					).
+					Preemption(kueue.ClusterQueuePreemption{
+						ReclaimWithinCohort: kueue.PreemptionPolicyAny,
+						WithinClusterQueue:  kueue.PreemptionPolicyLowerPriority,
+						BorrowWithinCohort: &kueue.BorrowWithinCohort{
+							Policy: kueue.BorrowWithinCohortPolicyLowerPriority,
+						},
+					}).
+					Obj(),
+			},
+			workloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("low-cpu", "default").
+					UID("wl-low-cpu").JobUID("job-low-cpu").
+					Queue("tas-lq-a").Priority(-1000).
+					ReserveQuotaAt(utiltestingapi.MakeAdmission("tas-cq-a").
+						PodSets(utiltestingapi.MakePodSetAssignment("one").
+							Assignment(corev1.ResourceCPU, "tas-default", "10").
+							TopologyAssignment(utiltestingapi.MakeTopologyAssignment([]string{corev1.LabelHostname}).
+								Domain(utiltestingapi.MakeTopologyDomainAssignment([]string{"node-1"}, 1).Obj()).
+								Domain(utiltestingapi.MakeTopologyDomainAssignment([]string{"node-2"}, 1).Obj()).
+								Obj()).
+							Obj()).
+						Obj(), now).
+					AdmittedAt(true, now).
+					PodSets(*utiltestingapi.MakePodSet("one", 2).
+						RequiredTopologyRequest(corev1.LabelHostname).
+						Request(corev1.ResourceCPU, "5").
+						Obj()).
+					Obj(),
+				*utiltestingapi.MakeWorkload("low-gpu", "default").
+					UID("wl-low-gpu").JobUID("job-low-gpu").
+					Queue("tas-lq-a").Priority(-1000).
+					ReserveQuotaAt(utiltestingapi.MakeAdmission("tas-cq-a").
+						PodSets(utiltestingapi.MakePodSetAssignment("one").
+							Assignment(corev1.ResourceCPU, "tas-default", "20m").
+							Assignment("example.com/gpu", "tas-default", "16").
+							TopologyAssignment(utiltestingapi.MakeTopologyAssignment([]string{corev1.LabelHostname}).
+								Domain(utiltestingapi.MakeTopologyDomainAssignment([]string{"node-1"}, 1).Obj()).
+								Domain(utiltestingapi.MakeTopologyDomainAssignment([]string{"node-2"}, 1).Obj()).
+								Obj()).
+							Obj()).
+						Obj(), now).
+					AdmittedAt(true, now).
+					PodSets(*utiltestingapi.MakePodSet("one", 2).
+						RequiredTopologyRequest(corev1.LabelHostname).
+						Request(corev1.ResourceCPU, "10m").
+						Request("example.com/gpu", "8").
+						Obj()).
+					Obj(),
+				*utiltestingapi.MakeWorkload("standard", "default").
+					UID("wl-standard").JobUID("job-standard").
+					Queue("tas-lq-b").Priority(0).
+					PodSets(*utiltestingapi.MakePodSet("one", 1).
+						RequiredTopologyRequest(corev1.LabelHostname).
+						Request(corev1.ResourceCPU, "5").
+						Request("example.com/gpu", "8").
+						Obj()).
+					Obj(),
+			},
+			wantWorkloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("low-cpu", "default").
+					UID("wl-low-cpu").JobUID("job-low-cpu").
+					Queue("tas-lq-a").Priority(-1000).
+					ReserveQuotaAt(utiltestingapi.MakeAdmission("tas-cq-a").
+						PodSets(utiltestingapi.MakePodSetAssignment("one").
+							Assignment(corev1.ResourceCPU, "tas-default", "10").
+							TopologyAssignment(utiltestingapi.MakeTopologyAssignment([]string{corev1.LabelHostname}).
+								Domain(utiltestingapi.MakeTopologyDomainAssignment([]string{"node-1"}, 1).Obj()).
+								Domain(utiltestingapi.MakeTopologyDomainAssignment([]string{"node-2"}, 1).Obj()).
+								Obj()).
+							Obj()).
+						Obj(), now).
+					AdmittedAt(true, now).
+					PodSets(*utiltestingapi.MakePodSet("one", 2).
+						RequiredTopologyRequest(corev1.LabelHostname).
+						Request(corev1.ResourceCPU, "5").
+						Obj()).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadEvicted,
+						Status:             metav1.ConditionTrue,
+						Reason:             "Preempted",
+						Message:            "Preempted to accommodate a workload (UID: wl-standard, JobUID: job-standard) due to reclamation within the cohort while borrowing; preemptor path: /tas-cohort-main/tas-cq-b; preemptee path: /tas-cohort-main/tas-cq-a",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadPreempted,
+						Status:             metav1.ConditionTrue,
+						Reason:             "InCohortReclaimWhileBorrowing",
+						Message:            "Preempted to accommodate a workload (UID: wl-standard, JobUID: job-standard) due to reclamation within the cohort while borrowing; preemptor path: /tas-cohort-main/tas-cq-b; preemptee path: /tas-cohort-main/tas-cq-a",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					SchedulingStatsEviction(kueue.WorkloadSchedulingStatsEviction{Reason: "Preempted", Count: 1}).
+					Obj(),
+				*utiltestingapi.MakeWorkload("low-gpu", "default").
+					UID("wl-low-gpu").JobUID("job-low-gpu").
+					Queue("tas-lq-a").Priority(-1000).
+					ReserveQuotaAt(utiltestingapi.MakeAdmission("tas-cq-a").
+						PodSets(utiltestingapi.MakePodSetAssignment("one").
+							Assignment(corev1.ResourceCPU, "tas-default", "20m").
+							Assignment("example.com/gpu", "tas-default", "16").
+							TopologyAssignment(utiltestingapi.MakeTopologyAssignment([]string{corev1.LabelHostname}).
+								Domain(utiltestingapi.MakeTopologyDomainAssignment([]string{"node-1"}, 1).Obj()).
+								Domain(utiltestingapi.MakeTopologyDomainAssignment([]string{"node-2"}, 1).Obj()).
+								Obj()).
+							Obj()).
+						Obj(), now).
+					AdmittedAt(true, now).
+					PodSets(*utiltestingapi.MakePodSet("one", 2).
+						RequiredTopologyRequest(corev1.LabelHostname).
+						Request(corev1.ResourceCPU, "10m").
+						Request("example.com/gpu", "8").
+						Obj()).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadEvicted,
+						Status:             metav1.ConditionTrue,
+						Reason:             "Preempted",
+						Message:            "Preempted to accommodate a workload (UID: wl-standard, JobUID: job-standard) due to reclamation within the cohort while borrowing; preemptor path: /tas-cohort-main/tas-cq-b; preemptee path: /tas-cohort-main/tas-cq-a",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadPreempted,
+						Status:             metav1.ConditionTrue,
+						Reason:             "InCohortReclaimWhileBorrowing",
+						Message:            "Preempted to accommodate a workload (UID: wl-standard, JobUID: job-standard) due to reclamation within the cohort while borrowing; preemptor path: /tas-cohort-main/tas-cq-b; preemptee path: /tas-cohort-main/tas-cq-a",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					SchedulingStatsEviction(kueue.WorkloadSchedulingStatsEviction{Reason: "Preempted", Count: 1}).
+					Obj(),
+				*utiltestingapi.MakeWorkload("standard", "default").
+					UID("wl-standard").JobUID("job-standard").
+					Queue("tas-lq-b").Priority(0).
+					PodSets(*utiltestingapi.MakePodSet("one", 1).
+						RequiredTopologyRequest(corev1.LabelHostname).
+						Request(corev1.ResourceCPU, "5").
+						Request("example.com/gpu", "8").
+						Obj()).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadQuotaReserved,
+						Status:             metav1.ConditionFalse,
+						Reason:             "Pending",
+						Message:            "couldn't assign flavors to pod set one: insufficient unused quota for example.com/gpu in flavor tas-default, 8 more needed. Pending the preemption of 2 workload(s)",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					ResourceRequests(kueue.PodSetRequest{
+						Name: "one",
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("5"),
+							"example.com/gpu":  resource.MustParse("8"),
+						},
+					}).
+					Obj(),
+			},
+			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
+				"tas-cq-b": {"default/standard"},
+			},
+			wantEvents: []utiltesting.EventRecord{
+				utiltesting.MakeEventRecord("default", "low-cpu", "EvictedDueToPreempted", corev1.EventTypeNormal).Obj(),
+				utiltesting.MakeEventRecord("default", "low-cpu", "Preempted", corev1.EventTypeNormal).Obj(),
+				utiltesting.MakeEventRecord("default", "low-gpu", "EvictedDueToPreempted", corev1.EventTypeNormal).Obj(),
+				utiltesting.MakeEventRecord("default", "low-gpu", "Preempted", corev1.EventTypeNormal).Obj(),
+				utiltesting.MakeEventRecord("default", "standard", "PreemptedWorkload", corev1.EventTypeNormal).Obj(),
+				utiltesting.MakeEventRecord("default", "standard", "PreemptedWorkload", corev1.EventTypeNormal).Obj(),
+				utiltesting.MakeEventRecord("default", "standard", "Pending", corev1.EventTypeWarning).Obj(),
+			},
+			eventCmpOpts: cmp.Options{eventIgnoreMessage},
+		},
 	}
 	for name, tc := range cases {
 		for _, enabled := range []bool{false, true} {
@@ -6266,6 +6527,11 @@ func TestScheduleForTASCohorts(t *testing.T) {
 					if flavor.Spec.TopologyName != nil {
 						t := topologyByName[*flavor.Spec.TopologyName]
 						cqCache.AddOrUpdateTopology(log, &t)
+					}
+				}
+				for _, cohort := range tc.cohorts {
+					if err := cqCache.AddOrUpdateCohort(&cohort); err != nil {
+						t.Fatalf("Inserting Cohort %s in cache: %v", cohort.Name, err)
 					}
 				}
 				for _, cq := range tc.clusterQueues {

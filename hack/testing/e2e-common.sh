@@ -89,12 +89,12 @@ function e2e_crd_exists {
     kubectl ${kubectl_args[@]+"${kubectl_args[@]}"} get crd "${crd}" >/dev/null 2>&1
 }
 
-if [[ -n ${APPWRAPPER_VERSION:-} && ("$GINKGO_ARGS" =~ feature:appwrapper || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
+if [[ -n ${APPWRAPPER_VERSION:-} && ("$GINKGO_ARGS" =~ feature:(appwrapper|managejobswithoutqueuename) || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
     export APPWRAPPER_MANIFEST=${ROOT_DIR}/dep-crds/appwrapper/config/default
     export APPWRAPPER_IMAGE=quay.io/ibm/appwrapper:${APPWRAPPER_VERSION}
 fi
 
-if [[ -n ${JOBSET_VERSION:-} && ("$GINKGO_ARGS" =~ feature:(jobset|tas|trainjob) || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
+if [[ -n ${JOBSET_VERSION:-} && ("$GINKGO_ARGS" =~ feature:(jobset|tas|trainjob|managejobswithoutqueuename) || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
     export JOBSET_MANIFEST="https://github.com/kubernetes-sigs/jobset/releases/download/${JOBSET_VERSION}/manifests.yaml"
     export JOBSET_IMAGE=registry.k8s.io/jobset/jobset:${JOBSET_VERSION}
     export JOBSET_CRDS=${ROOT_DIR}/dep-crds/jobset-operator/
@@ -129,9 +129,13 @@ if [[ -n ${KUBERAY_VERSION:-} && ("$GINKGO_ARGS" =~ feature:kuberay || ! "$GINKG
     export KUBERAY_IMAGE=quay.io/kuberay/operator:${KUBERAY_VERSION}
 fi
 
-if [[ -n ${LEADERWORKERSET_VERSION:-} && ("$GINKGO_ARGS" =~ feature:leaderworkerset || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
+if [[ -n ${LEADERWORKERSET_VERSION:-} && ("$GINKGO_ARGS" =~ feature:(leaderworkerset|managejobswithoutqueuename) || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
     export LEADERWORKERSET_MANIFEST="https://github.com/kubernetes-sigs/lws/releases/download/${LEADERWORKERSET_VERSION}/manifests.yaml"
     export LEADERWORKERSET_IMAGE=registry.k8s.io/lws/lws:${LEADERWORKERSET_VERSION}
+fi
+
+if [[ -n ${SPARKOPERATOR_VERSION:-} && ("$GINKGO_ARGS" =~ feature:spark || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
+    export SPARKOPERATOR_IMAGE="ghcr.io/kubeflow/spark-operator/controller:${SPARKOPERATOR_VERSION#v}"
 fi
 
 if [[ -n "${CERTMANAGER_VERSION:-}" ]]; then
@@ -277,6 +281,8 @@ function patch_kind_config_for_dra {
     cp "$1" "$patched_config"
 
     $YQ -i '.featureGates.DynamicResourceAllocation = true' "$patched_config"
+    # Enable Extended Resources (alpha feature in k8s 1.35)
+    $YQ -i '.featureGates.DRAExtendedResource = true' "$patched_config"
     $YQ -i '.containerdConfigPatches += ["[plugins.\"io.containerd.grpc.v1.cri\"]\n  enable_cdi = true"]' "$patched_config"
     $YQ -i '(.nodes[] | select(.role == "control-plane")).kubeadmConfigPatches[0] = "kind: ClusterConfiguration
 apiVersion: kubeadm.k8s.io/v1beta3
@@ -315,7 +321,7 @@ controllerManager:
 apiServer:
   extraArgs:
     enable-aggregator-routing: \"true\"
-    runtime-config: \"scheduling.k8s.io/v1alpha1=true\"
+    runtime-config: \"scheduling.k8s.io/v1alpha2=true\"
     v: \"3\"
 "' "$patched_config"
 
@@ -368,10 +374,10 @@ function prepare_docker_images {
     docker tag "$E2E_TEST_AGNHOST_IMAGE_OLD_WITH_SHA" "$E2E_TEST_AGNHOST_IMAGE_OLD"
     docker tag "$E2E_TEST_AGNHOST_IMAGE_WITH_SHA" "$E2E_TEST_AGNHOST_IMAGE"
 
-    if [[ -n ${APPWRAPPER_VERSION:-} && ("$GINKGO_ARGS" =~ feature:appwrapper || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
+    if [[ -n ${APPWRAPPER_VERSION:-} && ("$GINKGO_ARGS" =~ feature:(appwrapper|managejobswithoutqueuename) || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
         docker pull "${APPWRAPPER_IMAGE}"
     fi
-    if [[ -n ${JOBSET_VERSION:-} && ("$GINKGO_ARGS" =~ feature:(jobset|tas|trainjob) || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
+    if [[ -n ${JOBSET_VERSION:-} && ("$GINKGO_ARGS" =~ feature:(jobset|tas|trainjob|managejobswithoutqueuename) || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
         docker pull "${JOBSET_IMAGE}"
     fi
     if [[ -n ${KUBEFLOW_VERSION:-} && ("$GINKGO_ARGS" =~ feature:(jaxjob|pytorchjob) || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
@@ -391,11 +397,14 @@ function prepare_docker_images {
             docker pull "${KUBERAY_RAY_IMAGE}"
         fi
     fi
-    if [[ -n ${LEADERWORKERSET_VERSION:-} && ("$GINKGO_ARGS" =~ feature:leaderworkerset || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
+    if [[ -n ${LEADERWORKERSET_VERSION:-} && ("$GINKGO_ARGS" =~ feature:(leaderworkerset|managejobswithoutqueuename) || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
         docker pull "${LEADERWORKERSET_IMAGE}"
     fi
     if [[ -n ${KUEUE_UPGRADE_FROM_VERSION:-} ]]; then
         docker pull "${KUEUE_OLD_VERSION_IMAGE}"
+    fi
+    if [[ -n ${SPARKOPERATOR_VERSION:-} && ("$GINKGO_ARGS" =~ feature:spark || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
+        docker pull "${SPARKOPERATOR_IMAGE}"
     fi
 }
 
@@ -420,10 +429,10 @@ function kind_load {
 
     cluster_kind_load "${e2e_cluster_name}"
 
-    if [[ -n ${APPWRAPPER_VERSION:-} && ("$GINKGO_ARGS" =~ feature:appwrapper || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
+    if [[ -n ${APPWRAPPER_VERSION:-} && ("$GINKGO_ARGS" =~ feature:(appwrapper|managejobswithoutqueuename) || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
         install_appwrapper "${e2e_cluster_name}" "${e2e_kubeconfig}"
     fi
-    if [[ -n ${JOBSET_VERSION:-} && ("$GINKGO_ARGS" =~ feature:(jobset|tas|trainjob) || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
+    if [[ -n ${JOBSET_VERSION:-} && ("$GINKGO_ARGS" =~ feature:(jobset|tas|trainjob|managejobswithoutqueuename) || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
         install_jobset "${e2e_cluster_name}" "${e2e_kubeconfig}"
     fi
     if [[ -n ${KUBEFLOW_VERSION:-} && ("$GINKGO_ARGS" =~ feature:(jaxjob|pytorchjob) || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
@@ -440,11 +449,14 @@ function kind_load {
     if [[ -n ${KUBEFLOW_MPI_VERSION:-} ]]; then
         install_mpi "${e2e_cluster_name}" "${e2e_kubeconfig}"
     fi
-    if [[ -n ${LEADERWORKERSET_VERSION:-} && ("$GINKGO_ARGS" =~ feature:leaderworkerset || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
+    if [[ -n ${LEADERWORKERSET_VERSION:-} && ("$GINKGO_ARGS" =~ feature:(leaderworkerset|managejobswithoutqueuename) || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
         install_lws "${e2e_cluster_name}" "${e2e_kubeconfig}"
     fi
     if [[ -n ${KUBERAY_VERSION:-} && ("$GINKGO_ARGS" =~ feature:kuberay || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
         install_kuberay "${e2e_cluster_name}" "${e2e_kubeconfig}"
+    fi
+    if [[ -n ${SPARKOPERATOR_VERSION:-} && ("$GINKGO_ARGS" =~ feature:spark || ! "$GINKGO_ARGS" =~ "--label-filter") ]]; then
+        install_sparkoperator "$1" "$2"
     fi
     if [[ -n ${CERTMANAGER_VERSION:-} ]]; then
         install_cert_manager "${e2e_kubeconfig}"
@@ -897,6 +909,49 @@ function install_lws {
     kubectl wait --kubeconfig="${kubeconfig}" deploy/"${deployment_name}" -n "${ns}" --for=condition=available --timeout=5m || true
 }
 
+# $1 cluster name
+# $2 kubeconfig option
+function install_sparkoperator {
+    local cluster_name=$1
+    local kubeconfig=${2:-}
+    local ns="${SPARKOPERATOR_NAMESPACE:-spark-operator}"
+    local helm_release_name="${SPARKOPERATOR_HELM_RELEASE_NAME:-spark-operator}"
+    local expected_version="${SPARKOPERATOR_VERSION:-}"
+    expected_version="${expected_version#v}"
+    local install_cmd="install"
+    cluster_kind_load_image "${cluster_name}" "${SPARKOPERATOR_IMAGE}"
+
+    ${HELM} repo add --force-update spark-operator https://kubeflow.github.io/spark-operator
+
+    if [[ "${E2E_MODE}" == "dev" ]] && e2e_is_truthy "${E2E_ENFORCE_OPERATOR_UPDATE}" ; then
+        if helm list --namespace "${ns}" | grep -q "${helm_release_name}"; then
+            local installed_version=""
+            installed_version=$(helm get values --namespace="${ns}" "${helm_release_name}" -o json | jq -r '.image.tag')
+            if [[ -n "${installed_version}" ]] && { [[ -z "${expected_version}" ]] || e2e_versions_match "${installed_version}" "${expected_version}"; }; then
+                echo "Spark operator already installed (${installed_version}); skipping install (E2E_MODE=dev)."
+                return 0
+            fi
+            install_cmd="upgrade"
+            if [[ -n "${installed_version}" && -n "${expected_version}" ]]; then
+                echo "Spark operator installed version (${installed_version}) does not match requested (${expected_version}); upgrading."
+            else
+                echo "Spark operator already present; upgrading."
+            fi
+        else 
+            echo "Spark operator helm release not found; installing."
+        fi
+    fi
+
+    ${HELM} --kubeconfig="${kubeconfig}" \
+    ${install_cmd} "${helm_release_name}" spark-operator/spark-operator \
+    --version "${expected_version}" \
+    --namespace "${ns}" \
+    --create-namespace \
+    --wait \
+    --set image.tag="${expected_version}" \
+    --set 'spark.jobNamespaces[0]='
+}
+
 # $1 kubeconfig option
 function install_cert_manager {
     local kubeconfig=${1:-}
@@ -1207,4 +1262,34 @@ EOF
     kubectl wait --for=condition=available --timeout=300s deployment/"${KUEUE_DEPLOYMENT_NAME}" -n "${KUEUE_NAMESPACE}"
     echo "Upgrade complete (rolling update finished)"
     echo "========================================="
+}
+
+# Run ginkgo e2e tests with extra CLI flags from GINKGO_ARGS.
+#
+# GINKGO_ARGS may contain multiple flags and quoted values with spaces, e.g.
+#   GINKGO_ARGS='--repeat=2 --focus="should run one case"'
+# so it must be reparsed into an array before invocation.
+# Package paths must not be passed via GINKGO_ARGS; they come from "$@".
+run_e2e_ginkgo() {
+  local ginkgo_extra=()
+  local had_noglob=0
+  local rc=0
+
+  if [[ -n ${GINKGO_ARGS:-} ]]; then
+    # Preserve the caller's globbing state. While reparsing GINKGO_ARGS we want
+    # shell quoting to work, but we do not want '*' or '?' expanded to filenames.
+    [[ $- == *f* ]] && had_noglob=1
+    set -f
+    eval "ginkgo_extra=($GINKGO_ARGS)"
+    rc=$?
+    (( had_noglob == 0 )) && set +f
+    (( rc == 0 )) || return "$rc"
+  fi
+
+  # Print the exact argv for troubleshooting quoting / flag-order issues.
+  printf 'running:' >&2
+  printf ' %q' "$GINKGO" run "${ginkgo_extra[@]}" "$@" >&2
+  printf '\n' >&2
+
+  "$GINKGO" run "${ginkgo_extra[@]}" "$@"
 }

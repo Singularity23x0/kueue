@@ -205,21 +205,21 @@ func run() int {
 	cCache := schdcache.New(mgr.GetClient())
 
 	// setup inadmissible workload requeuer
-	requeuer := qcache.NewRequeuer(qcache.RequeueBatchPeriodProd)
+	requeuer := qcache.NewRequeuer()
 	if err := mgr.Add(requeuer); err != nil {
 		log.Error(err, "Unable to add workloadRequeuer to manager")
 		return 1
 	}
 
-	queues := qcache.NewManager(mgr.GetClient(), cCache, requeuer)
+	preemptionExpectations := preemptexpectations.New()
+	queueOptions := qcache.WithPreemptionExpectations(preemptionExpectations)
+	queues := qcache.NewManager(mgr.GetClient(), cCache, requeuer, queueOptions)
 
 	go queues.CleanUpOnContext(ctx)
 	go cCache.CleanUpOnContext(ctx)
 
-	preemptionExpectations := preemptexpectations.New()
-
 	// Setup core controllers
-	if failedCtrl, err := core.SetupControllers(mgr, queues, cCache, &configapi.Configuration{}, nil, preemptionExpectations); err != nil {
+	if failedCtrl, err := core.SetupControllers(mgr, queues, cCache, &configapi.Configuration{}, nil, preemptionExpectations, nil); err != nil {
 		log.Error(err, "Unable to create core controller", "controller", failedCtrl)
 		return 1
 	}

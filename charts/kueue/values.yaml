@@ -10,6 +10,13 @@ fullnameOverride: ""
 enablePrometheus: false
 # -- Enable x509 automated certificate management using cert-manager (cert-manager.io)
 enableCertManager: false
+certManager:
+  # -- Override the default self-signed cert-manager issuer reference. When set, the chart skips creating its own Issuer and uses this reference for webhook, metrics, and visibility certificates. The referenced issuer must provide the CA data required by Kueue's cert-manager integration.
+  issuerRef: {}
+  # issuerRef:
+  #   name: my-cluster-issuer
+  #   kind: ClusterIssuer
+  #   group: cert-manager.io
 # -- Enable API Priority and Fairness configuration for the visibility API
 enableVisibilityAPF: false
 # -- Enable KueueViz dashboard
@@ -33,6 +40,8 @@ controllerManager:
       # This should be set to 'IfNotPresent' for released version
       pullPolicy: Always
     podAnnotations: {}
+    # -- Zap log level. Higher values increase verbosity.
+    logLevel: 2
     # -- ControllerManager's pod resources
     resources:
       limits:
@@ -153,6 +162,7 @@ managerConfig:
       - "kubeflow.org/xgboostjob"
       - "kubeflow.org/jaxjob"
       - "workload.codeflare.dev/appwrapper"
+    #  - "sparkoperator.k8s.io/sparkapplication"
       - "pod"
       - "deployment"
       - "statefulset"
@@ -301,9 +311,7 @@ kueueViz:
     # -- KueueViz frontend container securityContext
     containerSecurityContext: {}
     # -- Environment variables for KueueViz frontend deployment
-    env:
-      - name: REACT_APP_WEBSOCKET_URL
-        value: "wss://backend.kueueviz.local"
+    env: []
     ingress:
       # -- Enable KueueViz dashboard frontend ingress
       enabled: true

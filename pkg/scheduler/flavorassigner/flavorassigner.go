@@ -21,7 +21,6 @@ import (
 	"maps"
 	"math"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -249,7 +248,7 @@ func (s *Status) Message() string {
 	if s.err != nil {
 		return s.err.Error()
 	}
-	sort.Strings(s.reasons)
+	slices.Sort(s.reasons)
 	return strings.Join(s.reasons, ", ")
 }
 
@@ -709,6 +708,18 @@ func (a *FlavorAssigner) assignFlavors(log logr.Logger, counts []int32) Assignme
 				// update the mode for all flavors and the representative mode
 				psAssignment.updateMode(NoFit)
 				assignment.representativeMode = ptr.To(NoFit)
+			} else {
+				// Update TAS-related assignments to Preempt because preemptions might be needed
+				// in resources in which total unused quota is sufficient (Fit), but the
+				// quota is fragmented.
+				for _, reqs := range tasRequests {
+					for _, req := range reqs {
+						if psAssignment := assignment.podSetAssignmentByName(req.PodSet.Name); psAssignment != nil {
+							psAssignment.updateMode(Preempt)
+						}
+					}
+				}
+				assignment.representativeMode = ptr.To(Preempt)
 			}
 		}
 	}

@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	config "sigs.k8s.io/kueue/apis/config/v1beta2"
+	qcache "sigs.k8s.io/kueue/pkg/cache/queue"
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
 	"sigs.k8s.io/kueue/pkg/constants"
 	"sigs.k8s.io/kueue/pkg/controller/admissionchecks/multikueue"
@@ -113,13 +114,14 @@ func managerSetup(ctx context.Context, mgr manager.Manager) {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	cCache := schdcache.New(mgr.GetClient())
-	queues := util.NewManagerForIntegrationTests(ctx, mgr.GetClient(), cCache)
+	preemptionExpectations := preemptexpectations.New()
+	queueOptions := []qcache.Option{qcache.WithPreemptionExpectations(preemptionExpectations)}
+	queues := util.NewManagerForIntegrationTests(ctx, mgr.GetClient(), cCache, queueOptions...)
 
 	configuration := &config.Configuration{}
 	mgr.GetScheme().Default(configuration)
 
-	preemptionExpectations := preemptexpectations.New()
-	failedCtrl, err := core.SetupControllers(mgr, queues, cCache, configuration, nil, preemptionExpectations)
+	failedCtrl, err := core.SetupControllers(mgr, queues, cCache, configuration, nil, preemptionExpectations, nil)
 	gomega.Expect(err).ToNot(gomega.HaveOccurred(), "controller", failedCtrl)
 
 	failedCtrl, err = tas.SetupControllers(mgr, queues, cCache, configuration, nil)
@@ -192,26 +194,22 @@ var _ = ginkgo.BeforeSuite(func() {
 	ginkgo.By("creating the clusters", func() {
 		mu = sync.Mutex{}
 		wg := sync.WaitGroup{}
-		wg.Add(3)
-		go func() {
+		wg.Go(func() {
 			defer ginkgo.GinkgoRecover()
-			defer wg.Done()
 			// pass nil setup since the manager for the manage cluster is different in some specs.
 			c := createCluster(nil, managerFeatureGates...)
 			managerTestCluster = c
-		}()
-		go func() {
+		})
+		wg.Go(func() {
 			defer ginkgo.GinkgoRecover()
-			defer wg.Done()
 			c := createCluster(managerSetup)
 			worker1TestCluster = c
-		}()
-		go func() {
+		})
+		wg.Go(func() {
 			defer ginkgo.GinkgoRecover()
-			defer wg.Done()
 			c := createCluster(managerSetup)
 			worker2TestCluster = c
-		}()
+		})
 		wg.Wait()
 	})
 
@@ -228,4 +226,9 @@ var _ = ginkgo.AfterSuite(func() {
 	managerTestCluster.fwk.Teardown()
 	worker1TestCluster.fwk.Teardown()
 	worker2TestCluster.fwk.Teardown()
+})
+
+var _ = ginkgo.ReportAfterSuite("Generate JUnit Report", func(report ginkgo.Report) {
+	err := util.ConfigureSuiteReporting(report)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 })

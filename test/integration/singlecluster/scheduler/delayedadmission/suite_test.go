@@ -67,6 +67,11 @@ var _ = ginkgo.AfterSuite(func() {
 	fwk.Teardown()
 })
 
+var _ = ginkgo.ReportAfterSuite("Generate JUnit Report", func(report ginkgo.Report) {
+	err := util.ConfigureSuiteReporting(report)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+})
+
 func managerAndSchedulerSetup(configuration *configapi.Configuration) framework.ManagerSetup {
 	if configuration == nil {
 		configuration = &configapi.Configuration{}
@@ -84,10 +89,11 @@ func managerAndSchedulerSetup(configuration *configapi.Configuration) framework.
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		cCache := schdcache.New(mgr.GetClient(), cacheOpts...)
+		preemptionExpectations := preemptexpectations.New()
+		queuesOpts = append(queuesOpts, qcache.WithPreemptionExpectations(preemptionExpectations))
 		queues := util.NewManagerForIntegrationTests(ctx, mgr.GetClient(), cCache, queuesOpts...)
 
-		preemptionExpectations := preemptexpectations.New()
-		failedCtrl, err := core.SetupControllers(mgr, queues, cCache, configuration, nil, preemptionExpectations)
+		failedCtrl, err := core.SetupControllers(mgr, queues, cCache, configuration, nil, preemptionExpectations, nil)
 		gomega.Expect(err).ToNot(gomega.HaveOccurred(), "controller", failedCtrl)
 
 		failedWebhook, err := webhooks.Setup(mgr, nil)

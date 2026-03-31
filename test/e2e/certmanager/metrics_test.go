@@ -201,7 +201,7 @@ var _ = ginkgo.Describe("Metrics", ginkgo.Ordered, func() {
 					}
 				}
 				g.Expect(hasKueueTarget).To(gomega.BeTrue(), "Kueue target not found. Active targets: %v", result.Active)
-			}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+			}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 
 			ginkgo.By("Verifying admission metric is available via PromQL")
 			gomega.Eventually(func(g gomega.Gomega) {
@@ -212,7 +212,7 @@ var _ = ginkgo.Describe("Metrics", ginkgo.Ordered, func() {
 				vector, ok := result.(model.Vector)
 				g.Expect(ok).To(gomega.BeTrue())
 				g.Expect(vector).NotTo(gomega.BeEmpty())
-			}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+			}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 		})
 		ginkgo.It("should continue to expose metrics after the secret is re-created", func() {
 			util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, workload)

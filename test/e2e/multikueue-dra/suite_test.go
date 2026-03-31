@@ -83,7 +83,7 @@ func waitForDRAExampleDriverAvailability(ctx context.Context, k8sClient client.C
 		g.Expect(k8sClient.Get(ctx, dsKey, daemonset)).To(gomega.Succeed())
 		g.Expect(daemonset.Status.DesiredNumberScheduled).To(gomega.BeNumerically(">", 0))
 		g.Expect(daemonset.Status.DesiredNumberScheduled).To(gomega.Equal(daemonset.Status.NumberAvailable))
-	}, util.StartUpTimeout, util.Interval).Should(gomega.Succeed())
+	}, util.VeryLongTimeout, util.Interval).Should(gomega.Succeed())
 	ginkgo.GinkgoLogr.Info("DaemonSet is available in the cluster", "daemonset", dsKey, "cluster", clusterName, "waitingTime", time.Since(waitForAvailableStart))
 }
 
@@ -137,5 +137,10 @@ var _ = ginkgo.BeforeSuite(func() {
 	discoveryClient, err := discovery.NewDiscoveryClientForConfig(managerCfg)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	managerK8SVersion, err = kubeversion.FetchServerVersion(discoveryClient)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+})
+
+var _ = ginkgo.ReportAfterSuite("Generate JUnit Report", func(report ginkgo.Report) {
+	err := util.ConfigureSuiteReporting(report)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 })

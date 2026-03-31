@@ -35,7 +35,7 @@ import (
 	"sigs.k8s.io/kueue/test/util"
 )
 
-var _ = ginkgo.Describe("Auto-Enablement of Pod Integration for Pod-Dependent Frameworks", ginkgo.Ordered, func() {
+var _ = ginkgo.Describe("Auto-Enablement of Pod Integration for Pod-Dependent Frameworks", ginkgo.Label("feature:podintegrationautoenablement"), ginkgo.Ordered, func() {
 	var (
 		ns           *corev1.Namespace
 		defaultRf    *kueue.ResourceFlavor
@@ -74,8 +74,8 @@ var _ = ginkgo.Describe("Auto-Enablement of Pod Integration for Pod-Dependent Fr
 
 	ginkgo.AfterEach(func() {
 		gomega.Expect(util.DeleteNamespace(ctx, k8sClient, ns)).To(gomega.Succeed())
-		util.ExpectObjectToBeDeletedWithTimeout(ctx, k8sClient, clusterQueue, true, util.LongTimeout)
-		util.ExpectObjectToBeDeletedWithTimeout(ctx, k8sClient, defaultRf, true, util.LongTimeout)
+		util.ExpectObjectToBeDeletedWithTimeout(ctx, k8sClient, clusterQueue, true, util.MediumTimeout)
+		util.ExpectObjectToBeDeletedWithTimeout(ctx, k8sClient, defaultRf, true, util.MediumTimeout)
 		util.ExpectAllPodsInNamespaceDeleted(ctx, k8sClient, ns)
 	})
 

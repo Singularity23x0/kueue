@@ -18,7 +18,6 @@ package queue
 
 import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
-	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/metrics"
 	"sigs.k8s.io/kueue/pkg/util/queue"
 	"sigs.k8s.io/kueue/pkg/util/roletracker"
@@ -33,7 +32,7 @@ func reportPendingWorkloads(m *Manager, cqRef kueue.ClusterQueueReference) {
 	}
 	reportCQPendingWorkloads(m, cq)
 
-	if !features.Enabled(features.LocalQueueMetrics) {
+	if !m.lqMetrics.IsEnabled() {
 		return
 	}
 	for _, lq := range m.localQueues {
@@ -49,11 +48,11 @@ func reportCQPendingWorkloads(m *Manager, cq *ClusterQueue) {
 		inadmissible += active
 		active = 0
 	}
-	metrics.ReportPendingWorkloads(cq.name, active, inadmissible, m.roleTracker)
+	metrics.ReportPendingWorkloads(cq.name, active, inadmissible, m.customLabels.CQGet(cq.name), m.roleTracker)
 }
 
 func reportLQPendingWorkloads(m *Manager, lq *LocalQueue) {
-	if !features.Enabled(features.LocalQueueMetrics) {
+	if !m.lqMetrics.ShouldExposeLocalQueueMetrics(lq.labels) {
 		return
 	}
 	var active, inadmissible int
@@ -68,22 +67,22 @@ func reportLQPendingWorkloads(m *Manager, lq *LocalQueue) {
 	metrics.ReportLocalQueuePendingWorkloads(metrics.LocalQueueReference{
 		Name:      lqName,
 		Namespace: namespace,
-	}, active, inadmissible, m.roleTracker)
+	}, active, inadmissible, m.customLabels.LQGet(lq.Key), m.roleTracker)
 }
 
 func reportLQFinishedWorkloads(m *Manager, lq *LocalQueue) {
-	if !features.Enabled(features.LocalQueueMetrics) {
+	if !m.lqMetrics.ShouldExposeLocalQueueMetrics(lq.labels) {
 		return
 	}
 	namespace, lqName := queue.MustParseLocalQueueReference(lq.Key)
 	metrics.ReportLocalQueueFinishedWorkloads(metrics.LocalQueueReference{
 		Name:      lqName,
 		Namespace: namespace,
-	}, lq.finishedWorkloads.Len(), m.roleTracker)
+	}, lq.finishedWorkloads.Len(), m.customLabels.LQGet(lq.Key), m.roleTracker)
 }
 
-func reportCQFinishedWorkloads(cq *ClusterQueue, roleTracker *roletracker.RoleTracker) {
-	metrics.ReportFinishedWorkloads(cq.name, cq.finishedWorkloads.Len(), roleTracker)
+func reportCQFinishedWorkloads(cq *ClusterQueue, roleTracker *roletracker.RoleTracker, cl *metrics.CustomLabels) {
+	metrics.ReportFinishedWorkloads(cq.name, cq.finishedWorkloads.Len(), cl.CQGet(cq.name), roleTracker)
 }
 
 func clearCQMetrics(cqRef kueue.ClusterQueueReference) {
@@ -91,9 +90,6 @@ func clearCQMetrics(cqRef kueue.ClusterQueueReference) {
 }
 
 func clearLQMetrics(lqRef queue.LocalQueueReference) {
-	if !features.Enabled(features.LocalQueueMetrics) {
-		return
-	}
 	namespace, lqName := queue.MustParseLocalQueueReference(lqRef)
 	metrics.ClearLocalQueueMetrics(metrics.LocalQueueReference{
 		Name:      lqName,

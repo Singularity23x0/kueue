@@ -36,8 +36,10 @@ import (
 	"sigs.k8s.io/kueue/pkg/cache/hierarchy"
 	queueafs "sigs.k8s.io/kueue/pkg/cache/queue/afs"
 	utilindexer "sigs.k8s.io/kueue/pkg/controller/core/indexer"
-	"sigs.k8s.io/kueue/pkg/features"
+	"sigs.k8s.io/kueue/pkg/dra"
+	"sigs.k8s.io/kueue/pkg/metrics"
 	afs "sigs.k8s.io/kueue/pkg/util/admissionfairsharing"
+	"sigs.k8s.io/kueue/pkg/util/expectations"
 	"sigs.k8s.io/kueue/pkg/util/queue"
 	"sigs.k8s.io/kueue/pkg/util/roletracker"
 	"sigs.k8s.io/kueue/pkg/workload"
@@ -63,6 +65,12 @@ func WithClock(c clock.WithDelayedExecution) Option {
 func WithAdmissionFairSharing(cfg *config.AdmissionFairSharing) Option {
 	return func(m *Manager) {
 		m.admissionFairSharingConfig = cfg
+	}
+}
+
+func WithPreemptionExpectations(preemptionExpectations *expectations.Store) Option {
+	return func(m *Manager) {
+		m.preemptionExpectations = preemptionExpectations
 	}
 }
 
@@ -92,6 +100,20 @@ func WithResourceTransformations(transforms []config.ResourceTransformation) Opt
 func WithRoleTracker(tracker *roletracker.RoleTracker) Option {
 	return func(m *Manager) {
 		m.roleTracker = tracker
+	}
+}
+
+// WithCustomLabels sets the custom labels for metrics.
+func WithCustomLabels(cl *metrics.CustomLabels) Option {
+	return func(m *Manager) {
+		m.customLabels = cl
+	}
+}
+
+// WithLocalQueueMetrics sets the configuration for local queue metrics.
+func WithLocalQueueMetrics(value *metrics.LocalQueueMetricsConfig) Option {
+	return func(m *Manager) {
+		m.lqMetrics = value
 	}
 }
 
@@ -136,9 +158,17 @@ type Manager struct {
 
 	draReconcileChannel chan<- event.TypedGenericEvent[*kueue.Workload]
 
-	roleTracker *roletracker.RoleTracker
+	roleTracker  *roletracker.RoleTracker
+	customLabels *metrics.CustomLabels
+	lqMetrics    *metrics.LocalQueueMetricsConfig
 
 	requeuer inadmissibleRequeuer
+
+	// preemptionExpectations track the preemptions initated by scheduler,
+	// but for which scheduler does not yet observed the Evicted condition.
+	// Once the Evicted condition is observed by scheduler the expectation
+	// can be removed - the expectation is satisfied.
+	preemptionExpectations *expectations.Store
 }
 
 // NewManager is a factory for cache.queue.Manager. For tests,
@@ -164,11 +194,10 @@ func NewManager(client client.Client, checker StatusChecker, requeuer inadmissib
 		AfsConsumedResources:   queueafs.NewAfsConsumedResources(),
 		requeuer:               requeuer,
 	}
-	m.requeuer.setManager(m)
-
 	for _, option := range options {
 		option(m)
 	}
+	m.requeuer.setManager(m)
 	m.cond.L = &m.RWMutex
 	return m
 }
@@ -212,7 +241,7 @@ func (m *Manager) addFinishedWorkloadWithoutLock(wl *kueue.Workload) {
 		return
 	}
 	cq.finishedWorkloads.Insert(wlKey)
-	reportCQFinishedWorkloads(cq, m.roleTracker)
+	reportCQFinishedWorkloads(cq, m.roleTracker, m.customLabels)
 }
 
 func (m *Manager) deleteFinishedWorkloadWithoutLock(wlKey workload.Reference) {
@@ -236,7 +265,7 @@ func (m *Manager) deleteFinishedWorkloadWithoutLock(wlKey workload.Reference) {
 		return
 	}
 	cq.finishedWorkloads.Delete(wlKey)
-	reportCQFinishedWorkloads(cq, m.roleTracker)
+	reportCQFinishedWorkloads(cq, m.roleTracker, m.customLabels)
 }
 
 func (m *Manager) AddOrUpdateCohort(ctx context.Context, cohort *kueue.Cohort) {
@@ -289,7 +318,7 @@ func (m *Manager) AddClusterQueue(ctx context.Context, cq *kueue.ClusterQueue) e
 	for _, q := range queues.Items {
 		qImpl := m.localQueues[queue.Key(&q)]
 		if qImpl != nil {
-			added := cqImpl.AddFromLocalQueue(qImpl, m.roleTracker)
+			added := cqImpl.AddFromLocalQueue(qImpl, m.roleTracker, m.customLabels)
 			addedWorkloads = addedWorkloads || added
 			cqImpl.addLocalQueue(queue.Key(&q))
 		}
@@ -304,7 +333,7 @@ func (m *Manager) AddClusterQueue(ctx context.Context, cq *kueue.ClusterQueue) e
 	return nil
 }
 
-func (m *Manager) UpdateClusterQueue(ctx context.Context, cq *kueue.ClusterQueue, specUpdated bool) error {
+func (m *Manager) UpdateClusterQueue(ctx context.Context, cq *kueue.ClusterQueue, specUpdated, labelsUpdated bool) error {
 	m.Lock()
 	defer m.Unlock()
 	cqName := kueue.ClusterQueueReference(cq.Name)
@@ -329,8 +358,11 @@ func (m *Manager) UpdateClusterQueue(ctx context.Context, cq *kueue.ClusterQueue
 		// to process.
 		notifyRetryInadmissibleWithoutLock(m, sets.New(cqName))
 	}
-	if !oldActive && cqImpl.Active() {
+	becameActive := !oldActive && cqImpl.Active()
+	if becameActive || labelsUpdated {
 		reportPendingWorkloads(m, cqName)
+	}
+	if becameActive {
 		m.Broadcast()
 	}
 	return nil
@@ -401,7 +433,7 @@ func (m *Manager) AddLocalQueue(ctx context.Context, q *kueue.LocalQueue) error 
 		}
 
 		log := ctrl.LoggerFrom(ctx).WithValues("workload", klog.KObj(&w))
-		if features.Enabled(features.DynamicResourceAllocation) && workload.HasDRA(&w) {
+		if dra.NeedsDRAReconcile(&w) {
 			if m.draReconcileChannel != nil {
 				m.draReconcileChannel <- event.TypedGenericEvent[*kueue.Workload]{Object: &w}
 				log.V(4).Info("Sent DRA workload to reconcile channel due to LocalQueue creation")
@@ -415,7 +447,7 @@ func (m *Manager) AddLocalQueue(ctx context.Context, q *kueue.LocalQueue) error 
 		qImpl.AddOrUpdate(wInfo)
 	}
 
-	if cq != nil && cq.AddFromLocalQueue(qImpl, m.roleTracker) {
+	if cq != nil && cq.AddFromLocalQueue(qImpl, m.roleTracker, m.customLabels) {
 		m.Broadcast()
 	}
 	return nil
@@ -431,12 +463,12 @@ func (m *Manager) UpdateLocalQueue(log logr.Logger, q *kueue.LocalQueue) error {
 	if qImpl.ClusterQueue != q.Spec.ClusterQueue {
 		oldCQ := m.hm.ClusterQueue(qImpl.ClusterQueue)
 		if oldCQ != nil {
-			oldCQ.DeleteFromLocalQueue(log, qImpl, m.roleTracker)
+			oldCQ.DeleteFromLocalQueue(log, qImpl, m.roleTracker, m.customLabels)
 			oldCQ.deleteLocalQueue(queue.Key(q))
 		}
 		newCQ := m.hm.ClusterQueue(q.Spec.ClusterQueue)
 		if newCQ != nil {
-			newCQ.AddFromLocalQueue(qImpl, m.roleTracker)
+			newCQ.AddFromLocalQueue(qImpl, m.roleTracker, m.customLabels)
 			newCQ.addLocalQueue(queue.Key(q))
 			m.Broadcast()
 		}
@@ -455,10 +487,12 @@ func (m *Manager) DeleteLocalQueue(log logr.Logger, q *kueue.LocalQueue) {
 	}
 	cq := m.hm.ClusterQueue(qImpl.ClusterQueue)
 	if cq != nil {
-		cq.DeleteFromLocalQueue(log, qImpl, m.roleTracker)
+		cq.DeleteFromLocalQueue(log, qImpl, m.roleTracker, m.customLabels)
 		cq.deleteLocalQueue(key)
 	}
-	clearLQMetrics(key)
+	if m.lqMetrics.IsEnabled() {
+		clearLQMetrics(key)
+	}
 	delete(m.localQueues, key)
 }
 
@@ -542,6 +576,7 @@ func (m *Manager) AddOrUpdateWorkloadWithoutLock(log logr.Logger, w *kueue.Workl
 		return ErrClusterQueueDoesNotExist
 	}
 	cq.PushOrUpdate(wInfo)
+	m.preemptionExpectations.ObservedUID(log, client.ObjectKeyFromObject(w), w.UID)
 	reportLQPendingWorkloads(m, q)
 	reportCQPendingWorkloads(m, cq)
 	m.Broadcast()
@@ -571,6 +606,7 @@ func (m *Manager) RequeueWorkload(ctx context.Context, info *workload.Info, reas
 		return false
 	}
 	log := ctrl.LoggerFrom(ctx)
+	workload.AdjustResources(ctx, m.client, &w)
 	info.Update(log, &w)
 	m.addWorkload(info, q)
 
@@ -586,23 +622,6 @@ func (m *Manager) RequeueWorkload(ctx context.Context, info *workload.Info, reas
 		m.Broadcast()
 	}
 	return added
-}
-
-// HandleInadmissibleHash bulk-moves all workloads in the ClusterQueue's heap
-// that share the given scheduling hash to inadmissibleWorkloads.
-func (m *Manager) HandleInadmissibleHash(cqName kueue.ClusterQueueReference, hash string) int {
-	m.RLock()
-	defer m.RUnlock()
-	cq := m.hm.ClusterQueue(cqName)
-	if cq == nil {
-		return 0
-	}
-	moved := cq.handleInadmissibleHash(hash)
-	if moved > 0 {
-		// Update pending metrics for the CQ and all its LocalQueues.
-		reportPendingWorkloads(m, cqName)
-	}
-	return moved
 }
 
 // Delete the workload from queue or cluster queue.
@@ -860,6 +879,22 @@ func (m *Manager) queueSecondPass(ctx context.Context, w *kueue.Workload, iterat
 	if m.secondPassQueue.queue(wInfo) {
 		log.V(3).Info("Workload queued for second pass of scheduling", "workload", workload.Key(w))
 		m.Broadcast()
+	}
+}
+
+// ResyncGaugeMetrics re-reports pending and finished workload gauge metrics.
+func (m *Manager) ResyncGaugeMetrics() {
+	m.RLock()
+	defer m.RUnlock()
+	for _, cq := range m.hm.ClusterQueues() {
+		reportCQPendingWorkloads(m, cq)
+		reportCQFinishedWorkloads(cq, m.roleTracker, m.customLabels)
+	}
+	if m.lqMetrics.IsEnabled() {
+		for _, lq := range m.localQueues {
+			reportLQPendingWorkloads(m, lq)
+			reportLQFinishedWorkloads(m, lq)
+		}
 	}
 }
 

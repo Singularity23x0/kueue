@@ -404,12 +404,21 @@ func (p *Pod) PodSets(ctx context.Context) ([]kueue.PodSet, error) {
 // elapsed, it is treated as inactive. This prevents workloads from being
 // blocked by Pods that are stuck terminating, ensuring quota can be released
 // and new Pods admitted.
+//
+// When the FastQuotaReleaseInPodIntegration feature gate is enabled, any pod
+// with a DeletionTimestamp is treated as inactive immediately, regardless of
+// its grace period status. This allows quota to be released as soon as
+// preempted pods begin terminating.
 func (p *Pod) IsActive() bool {
 	for i := range p.list.Items {
 		pod := p.list.Items[i]
 
 		// Pods that are not in the Running phase are never considered Active.
 		if pod.Status.Phase != corev1.PodRunning {
+			continue
+		}
+
+		if features.Enabled(features.FastQuotaReleaseInPodIntegration) && pod.DeletionTimestamp != nil {
 			continue
 		}
 
@@ -1412,6 +1421,10 @@ func GetWorkloadNameForPod(podName string, podUID types.UID) string {
 func NewGroupWorkload(name string, obj client.Object, podSets []kueue.PodSet, labelKeysToCopy []string) *kueue.Workload {
 	wl := jobframework.NewWorkload(name, obj, podSets, labelKeysToCopy)
 	wl.Annotations[podconstants.IsGroupWorkloadAnnotationKey] = podconstants.IsGroupWorkloadAnnotationValue
+
+	if features.Enabled(features.AdmissionGatedBy) {
+		jobframework.PropagateAdmissionGatedByAnnotation(obj, wl)
+	}
 
 	return wl
 }

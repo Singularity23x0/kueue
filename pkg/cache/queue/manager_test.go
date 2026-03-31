@@ -36,8 +36,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	"sigs.k8s.io/kueue/pkg/metrics"
+	preemptexpectations "sigs.k8s.io/kueue/pkg/scheduler/preemption/expectations"
 	"sigs.k8s.io/kueue/pkg/util/queue"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
+	testingmetrics "sigs.k8s.io/kueue/pkg/util/testing/metrics"
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
 	"sigs.k8s.io/kueue/pkg/workload"
 )
@@ -105,7 +108,8 @@ func TestAddClusterQueueOrphans(t *testing.T) {
 		queues[0],
 		queues[1],
 	)
-	manager := NewManagerForUnitTests(kClient, nil)
+	queueOptions := []Option{WithPreemptionExpectations(preemptexpectations.New())}
+	manager := NewManagerForUnitTests(kClient, nil, queueOptions...)
 	cq := utiltestingapi.MakeClusterQueue("cq").Obj()
 	if err := manager.AddClusterQueue(ctx, cq); err != nil {
 		t.Fatalf("Failed adding cluster queue %s: %v", cq.Name, err)
@@ -197,7 +201,7 @@ func TestUpdateClusterQueue(t *testing.T) {
 
 	// Put cq2 in the same cohort as cq1.
 	clusterQueues[1].Spec.CohortName = clusterQueues[0].Spec.CohortName
-	if err := manager.UpdateClusterQueue(ctx, clusterQueues[1], true); err != nil {
+	if err := manager.UpdateClusterQueue(ctx, clusterQueues[1], true, false); err != nil {
 		t.Fatalf("Failed to update ClusterQueue: %v", err)
 	}
 
@@ -229,6 +233,77 @@ func TestUpdateClusterQueue(t *testing.T) {
 	}
 	if diff := cmp.Diff(wantActiveWorkloads, activeWorkloads); diff != "" {
 		t.Errorf("Unexpected active workloads (-want +got):\n%s", diff)
+	}
+}
+
+// TestUpdateClusterQueueLabelsUpdated tests that labelsUpdated triggers pending
+// workload metrics reporting without requeuing inadmissible workloads.
+func TestUpdateClusterQueueLabelsUpdated(t *testing.T) {
+	cases := map[string]struct {
+		labelsUpdated    bool
+		wantMetricsCount int
+	}{
+		"labelsUpdated=true reports metrics": {
+			labelsUpdated:    true,
+			wantMetricsCount: 2, // active + inadmissible gauges
+		},
+		"labelsUpdated=false does not report metrics": {
+			labelsUpdated:    false,
+			wantMetricsCount: 0,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctx, _ := utiltesting.ContextWithLog(t)
+			cq := utiltestingapi.MakeClusterQueue("cq1").Obj()
+			lq := utiltestingapi.MakeLocalQueue("foo", defaultNamespace).ClusterQueue("cq1").Obj()
+			wl := utiltestingapi.MakeWorkload("a", defaultNamespace).Queue("foo").Creation(time.Now()).Obj()
+
+			cl := utiltesting.NewFakeClient(utiltesting.MakeNamespace(defaultNamespace))
+			manager, watcher := NewManagerForUnitTestsWithRequeuer(cl, nil)
+
+			if err := manager.AddClusterQueue(ctx, cq); err != nil {
+				t.Fatalf("Failed adding clusterQueue: %v", err)
+			}
+			if err := manager.AddLocalQueue(ctx, lq); err != nil {
+				t.Fatalf("Failed adding queue: %v", err)
+			}
+
+			watcher.ProcessRequeues(ctx)
+
+			manager.getClusterQueue("cq1").popCycle++
+			if err := cl.Create(ctx, wl); err != nil {
+				t.Fatalf("Failed adding workload to client: %v", err)
+			}
+			manager.RequeueWorkload(ctx, workload.NewInfo(wl), RequeueReasonGeneric)
+
+			wantInadmissibleWorkloads := map[kueue.ClusterQueueReference][]workload.Reference{
+				"cq1": {"default/a"},
+			}
+			if diff := cmp.Diff(wantInadmissibleWorkloads, manager.DumpInadmissible()); diff != "" {
+				t.Fatalf("Unexpected set of inadmissible workloads (-want +got):\n%s", diff)
+			}
+
+			metrics.PendingWorkloads.Reset()
+
+			if err := manager.UpdateClusterQueue(ctx, cq, false, tc.labelsUpdated); err != nil {
+				t.Fatalf("Failed to update ClusterQueue: %v", err)
+			}
+
+			pendingMetrics := testingmetrics.CollectFilteredGaugeVec(metrics.PendingWorkloads, map[string]string{"cluster_queue": "cq1"})
+			if len(pendingMetrics) != tc.wantMetricsCount {
+				t.Errorf("Unexpected pending workload metrics count: got %d, want %d", len(pendingMetrics), tc.wantMetricsCount)
+			}
+
+			watcher.ProcessRequeues(ctx)
+
+			if diff := cmp.Diff(wantInadmissibleWorkloads, manager.DumpInadmissible()); diff != "" {
+				t.Errorf("Unexpected set of inadmissible workloads (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(map[kueue.ClusterQueueReference][]workload.Reference(nil), manager.Dump()); diff != "" {
+				t.Errorf("Unexpected active workloads (-want +got):\n%s", diff)
+			}
+		})
 	}
 }
 
@@ -393,7 +468,7 @@ func TestQueueInadmissibleWorkloads(t *testing.T) {
 					moveWorkloadsLogCount++
 				}
 			}, funcr.Options{Verbosity: 2})
-			ctx := logr.NewContext(context.Background(), logger)
+			ctx := logr.NewContext(t.Context(), logger)
 
 			cl := utiltesting.NewFakeClient(utiltesting.MakeNamespace(defaultNamespace))
 			manager, watcher := NewManagerForUnitTestsWithRequeuer(cl, nil)
@@ -475,7 +550,7 @@ func TestClusterQueueToActive(t *testing.T) {
 		t.Fatalf("Failed adding clusterQueue %v", err)
 	}
 
-	if err := manager.UpdateClusterQueue(ctx, runningCq, false); err != nil {
+	if err := manager.UpdateClusterQueue(ctx, runningCq, false, false); err != nil {
 		t.Fatalf("Failed to update ClusterQueue: %v", err)
 	}
 
@@ -512,7 +587,8 @@ func TestUpdateLocalQueue(t *testing.T) {
 		utiltestingapi.MakeWorkload("a", "").Queue("foo").Creation(now.Add(time.Second)).Obj(),
 		utiltestingapi.MakeWorkload("b", "").Queue("bar").Creation(now).Obj(),
 	}
-	manager := NewManagerForUnitTests(utiltesting.NewFakeClient(), nil)
+	queueOptions := []Option{WithPreemptionExpectations(preemptexpectations.New())}
+	manager := NewManagerForUnitTests(utiltesting.NewFakeClient(), nil, queueOptions...)
 	for _, cq := range clusterQueues {
 		if err := manager.AddClusterQueue(ctx, cq); err != nil {
 			t.Fatalf("Failed adding clusterQueue %s: %v", cq.Name, err)
@@ -584,7 +660,8 @@ func TestDeleteLocalQueue(t *testing.T) {
 func TestAddWorkload(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	ctx, log := utiltesting.ContextWithLog(t)
-	manager := NewManagerForUnitTests(utiltesting.NewFakeClient(), nil)
+	queueOptions := []Option{WithPreemptionExpectations(preemptexpectations.New())}
+	manager := NewManagerForUnitTests(utiltesting.NewFakeClient(), nil, queueOptions...)
 	cq := utiltestingapi.MakeClusterQueue("cq").Obj()
 	if err := manager.AddClusterQueue(ctx, cq); err != nil {
 		t.Fatalf("Failed adding clusterQueue %s: %v", cq.Name, err)
@@ -666,7 +743,7 @@ func TestAddWorkload(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.workload.Name, func(t *testing.T) {
-			manager := NewManagerForUnitTests(utiltesting.NewFakeClient(), nil)
+			manager := NewManagerForUnitTests(utiltesting.NewFakeClient(), nil, queueOptions...)
 			cq := utiltestingapi.MakeClusterQueue("cq").Obj()
 			if err := manager.AddClusterQueue(ctx, cq); err != nil {
 				t.Fatalf("Failed adding clusterQueue %s: %v", cq.Name, err)
@@ -693,7 +770,8 @@ func TestAddWorkload(t *testing.T) {
 
 func TestDeleteWorkload(t *testing.T) {
 	ctx, log := utiltesting.ContextWithLog(t)
-	manager := NewManagerForUnitTests(utiltesting.NewFakeClient(), nil)
+	queueOptions := []Option{WithPreemptionExpectations(preemptexpectations.New())}
+	manager := NewManagerForUnitTests(utiltesting.NewFakeClient(), nil, queueOptions...)
 	cq := utiltestingapi.MakeClusterQueue("cq").Obj()
 	if err := manager.AddClusterQueue(ctx, cq); err != nil {
 		t.Fatalf("Failed adding clusterQueue %s: %v", cq.Name, err)
@@ -744,7 +822,8 @@ func TestDeleteWorkload(t *testing.T) {
 
 func TestDeleteAndForgetWorkload(t *testing.T) {
 	ctx, log := utiltesting.ContextWithLog(t)
-	manager := NewManagerForUnitTests(utiltesting.NewFakeClient(), nil)
+	queueOptions := []Option{WithPreemptionExpectations(preemptexpectations.New())}
+	manager := NewManagerForUnitTests(utiltesting.NewFakeClient(), nil, queueOptions...)
 	cq := utiltestingapi.MakeClusterQueue("cq").Obj()
 	if err := manager.AddClusterQueue(ctx, cq); err != nil {
 		t.Fatalf("Failed adding clusterQueue %s: %v", cq.Name, err)
@@ -943,7 +1022,8 @@ func TestRequeueWorkloadStrictFIFO(t *testing.T) {
 		t.Run(tc.workload.Name, func(t *testing.T) {
 			cl := utiltesting.NewFakeClient()
 			ctx, log := utiltesting.ContextWithLog(t)
-			manager := NewManagerForUnitTests(cl, nil)
+			queueOptions := []Option{WithPreemptionExpectations(preemptexpectations.New())}
+			manager := NewManagerForUnitTests(cl, nil, queueOptions...)
 			if err := manager.AddClusterQueue(ctx, cq); err != nil {
 				t.Fatalf("Failed adding cluster queue %s: %v", cq.Name, err)
 			}
@@ -1128,7 +1208,8 @@ func TestUpdateWorkload(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			ctx, log := utiltesting.ContextWithLog(t)
-			manager := NewManagerForUnitTests(utiltesting.NewFakeClient(), nil)
+			queueOptions := []Option{WithPreemptionExpectations(preemptexpectations.New())}
+			manager := NewManagerForUnitTests(utiltesting.NewFakeClient(), nil, queueOptions...)
 			for _, cq := range tc.clusterQueues {
 				if err := manager.AddClusterQueue(ctx, cq); err != nil {
 					t.Fatalf("Adding cluster queue %s: %v", cq.Name, err)
@@ -1263,7 +1344,8 @@ func TestHeads(t *testing.T) {
 			ctx, cancel := context.WithTimeout(ctx, headsTimeout)
 			defer cancel()
 			fakeC := &fakeStatusChecker{}
-			manager := NewManagerForUnitTests(utiltesting.NewFakeClient(), fakeC)
+			queueOptions := []Option{WithPreemptionExpectations(preemptexpectations.New())}
+			manager := NewManagerForUnitTests(utiltesting.NewFakeClient(), fakeC, queueOptions...)
 			for _, cq := range clusterQueues {
 				if err := manager.AddClusterQueue(ctx, cq); err != nil {
 					t.Fatalf("Failed adding clusterQueue %s to manager: %v", cq.Name, err)
@@ -1517,7 +1599,9 @@ func TestHeadsAsync(t *testing.T) {
 			ctx, cancel := context.WithTimeout(ctx, headsTimeout)
 			defer cancel()
 			client := utiltesting.NewFakeClient(tc.initialObjs...)
-			manager := NewManagerForUnitTests(client, nil)
+			queueOptions := []Option{WithPreemptionExpectations(preemptexpectations.New())}
+			manager := NewManagerForUnitTests(client, nil, queueOptions...)
+
 			go manager.CleanUpOnContext(ctx)
 			tc.op(ctx, manager)
 			heads := manager.Heads(ctx)
@@ -1634,7 +1718,8 @@ func TestGetPendingWorkloadsInfo(t *testing.T) {
 		utiltestingapi.MakeWorkload("b", "").Queue("foo").Creation(now.Add(time.Second)).Obj(),
 	}
 
-	manager := NewManagerForUnitTests(utiltesting.NewFakeClient(), nil)
+	queueOptions := []Option{WithPreemptionExpectations(preemptexpectations.New())}
+	manager := NewManagerForUnitTests(utiltesting.NewFakeClient(), nil, queueOptions...)
 	for _, cq := range clusterQueues {
 		if err := manager.AddClusterQueue(ctx, cq); err != nil {
 			t.Fatalf("Failed adding clusterQueue %s: %v", cq.Name, err)
@@ -1867,7 +1952,8 @@ func TestGetWorkloadFromCache(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			manager := NewManagerForUnitTests(utiltesting.NewFakeClient(), nil)
+			queueOptions := []Option{WithPreemptionExpectations(preemptexpectations.New())}
+			manager := NewManagerForUnitTests(utiltesting.NewFakeClient(), nil, queueOptions...)
 			for _, cq := range clusterQueues {
 				if err := manager.AddClusterQueue(ctx, cq); err != nil {
 					t.Fatalf("Failed adding clusterQueue %s: %v", cq.Name, err)

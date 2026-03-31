@@ -41,6 +41,7 @@ import (
 
 	configapi "sigs.k8s.io/kueue/apis/config/v1beta2"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
 	"sigs.k8s.io/kueue/pkg/controller/constants"
 	"sigs.k8s.io/kueue/pkg/controller/jobframework"
 	workloadjob "sigs.k8s.io/kueue/pkg/controller/jobs/job"
@@ -491,7 +492,7 @@ var _ = ginkgo.Describe("Job controller", ginkgo.Label("job:batch", "area:jobs")
 					createdWl := kueue.Workload{}
 					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(wl), &createdWl)).To(gomega.Succeed())
 					util.MustHaveOwnerReference(g, createdWl.OwnerReferences, job, k8sClient.Scheme())
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 		})
 
@@ -934,7 +935,7 @@ var _ = ginkgo.Describe("When waitForPodsReady enabled", ginkgo.Ordered, ginkgo.
 	)
 
 	ginkgo.BeforeAll(func() {
-		fwk.StartManager(ctx, cfg, managerSetup(jobframework.WithWaitForPodsReady(&configapi.WaitForPodsReady{})))
+		fwk.StartManager(ctx, cfg, managerSetup(jobframework.WithWaitForPodsReady(&configapi.WaitForPodsReady{}), jobframework.WithCache(schdcache.New(k8sClient))))
 		ginkgo.By("Create a resource flavor")
 		util.MustCreate(ctx, k8sClient, defaultFlavor)
 	})
@@ -3079,7 +3080,7 @@ var _ = ginkgo.Describe("Job controller interacting with Workload controller whe
 	ginkgo.When("A long recoveryTimeout is configured and a pod fails", func() {
 		ginkgo.BeforeEach(func() {
 			waitForPodsReadyTimeout = metav1.Duration{Duration: 5 * time.Minute}
-			waitForPodsReadyRecoveryTimeout = &metav1.Duration{Duration: util.LongTimeout}
+			waitForPodsReadyRecoveryTimeout = &metav1.Duration{Duration: util.MediumTimeout}
 		})
 
 		ginkgo.It("should wait for .recoveryTimeout for a workload to recover", func() {
@@ -3910,14 +3911,14 @@ var _ = ginkgo.Describe("Job controller with ObjectRetentionPolicies", ginkgo.Or
 						}
 						g.Expect(err).NotTo(gomega.HaveOccurred())
 						g.Expect(createdJob.GetDeletionTimestamp()).ToNot(gomega.BeNil())
-					}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+					}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 				})
 			})
 		})
 
 		ginkgo.When("long deactivation retention period", func() {
 			ginkgo.BeforeEach(func() {
-				afterDeactivatedByKueue = &metav1.Duration{Duration: util.LongTimeout}
+				afterDeactivatedByKueue = &metav1.Duration{Duration: util.MediumTimeout}
 			})
 
 			ginkgo.It("shouldn't delete job", framework.SlowSpec, func() {
@@ -4378,9 +4379,9 @@ var _ = ginkgo.Describe("Job reconciliation", ginkgo.Ordered, func() {
 	ginkgo.AfterAll(func() {
 		gomega.Expect(util.DeleteNamespace(ctx, k8sClient, managedNs)).To(gomega.Succeed())
 		gomega.Expect(util.DeleteNamespace(ctx, k8sClient, unmanagedNs)).To(gomega.Succeed())
-		util.ExpectObjectToBeDeletedWithTimeout(ctx, k8sClient, rf, true, util.LongTimeout)
-		util.ExpectObjectToBeDeletedWithTimeout(ctx, k8sClient, lq, true, util.LongTimeout)
-		util.ExpectObjectToBeDeletedWithTimeout(ctx, k8sClient, cq, true, util.LongTimeout)
+		util.ExpectObjectToBeDeletedWithTimeout(ctx, k8sClient, rf, true, util.MediumTimeout)
+		util.ExpectObjectToBeDeletedWithTimeout(ctx, k8sClient, lq, true, util.MediumTimeout)
+		util.ExpectObjectToBeDeletedWithTimeout(ctx, k8sClient, cq, true, util.MediumTimeout)
 		fwk.StopManager(ctx)
 	})
 

@@ -364,6 +364,7 @@ rules:
   - apiGroups:
       - resource.k8s.io
     resources:
+      - deviceclasses
       - resourceclaims
       - resourceclaimtemplates
     verbs:
@@ -377,6 +378,17 @@ rules:
     verbs:
       - get
       - list
+      - watch
+  - apiGroups:
+      - sparkoperator.k8s.io
+    resources:
+      - sparkapplications
+    verbs:
+      - delete
+      - get
+      - list
+      - patch
+      - update
       - watch
   - apiGroups:
       - trainer.kubeflow.org
