@@ -9,11 +9,10 @@
   - [User Stories](#user-stories)
     - [Story 1](#story-1)
     - [Story 2](#story-2)
-  - [Notes/Constraints/Caveats (Optional)](#notesconstraintscaveats)
+  - [Notes/Constraints/Caveats](#notesconstraintscaveats)
   - [Risks and Mitigations](#risks-and-mitigations)
 - [Design Details](#design-details)
   - [Test Plan](#test-plan)
-    <!-- - [Prerequisite testing updates](#prerequisite-testing-updates) -->
     - [Unit tests](#unit-tests)
     - [Integration tests](#integration-tests)
     - [e2e tests](#e2e-tests)
@@ -21,6 +20,9 @@
 - [Implementation History](#implementation-history)
 - [Drawbacks](#drawbacks)
 - [Alternatives](#alternatives)
+  - [Global Status Summary](#global-status-summary)
+  - [Visibility API](#visibility-api)
+  - [Consolidated Workload State](#consolidated-workload-state)
 <!-- /toc -->
 
 ## Summary
