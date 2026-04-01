@@ -25,7 +25,7 @@
 
 ## Summary
 
-The Workload status in queue in the Management Cluster must reflect the true state of the workload derived from the remote cluster,
+The Workload status in queue in the MultiKueue Manager Cluster must reflect the true state of the workload derived from the remote cluster,
 including a human-readable message explaining the state (e.g., "Waiting for quota in cluster X").
 
 This KEP focuses on a mechanism to provide such high-level summary in the form of a new Workload Status Condition - the **MultiKueueWorkload** condition.
@@ -226,16 +226,16 @@ Integration tests for assigning the expected condition correctly for each Global
 ### Graduation Criteria
 
 - **Alpha**:
- - Feature is implemented behind the **MultiKueueGlobalStatusCondition** feature gate. FG disabled by default.
- - Unit, integration and E2E tests are implemented and confirmed passing and non-flaky.
+  - Feature is implemented behind the **MultiKueueGlobalStatusCondition** feature gate. FG disabled by default.
+  - Unit, integration and E2E tests are implemented and confirmed passing and non-flaky.
 - **Beta**:
- - Feature Gate is enabled by default.
- - The condition is confirmed (using a production-like environment) to populate correctly and reflect the actual state of the Manager Workload.
- - User feedback is gathered and taken into consideration.
+  - Feature Gate is enabled by default.
+  - The condition is confirmed (using a production-like environment) to populate correctly and reflect the actual state of the Manager Workload.
+  - User feedback is gathered and taken into consideration.
 - **Stable**:
- - The condition is populated as expected, as confirmed by tests and users.
- - Feature gate is removed.
- - Feature is confirmed as stable.
+  - The condition is populated as expected, as confirmed by tests and users.
+  - Feature gate is removed.
+  - Feature is confirmed as stable.
 
 ## Implementation History
 
