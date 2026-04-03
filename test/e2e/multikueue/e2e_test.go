@@ -181,6 +181,9 @@ var _ = ginkgo.Describe("MultiKueue", func() {
 					Resource(corev1.ResourceEphemeralStorage, "15G").
 					Obj(),
 			).
+			Preemption(kueue.ClusterQueuePreemption{
+				WithinClusterQueue: kueue.PreemptionPolicyLowerPriority,
+			}).
 			Obj()
 		util.CreateClusterQueuesAndWaitForActive(ctx, k8sWorker1Client, worker1Cq)
 
@@ -204,6 +207,9 @@ var _ = ginkgo.Describe("MultiKueue", func() {
 					Resource(corev1.ResourceEphemeralStorage, "5G").
 					Obj(),
 			).
+			Preemption(kueue.ClusterQueuePreemption{
+				WithinClusterQueue: kueue.PreemptionPolicyLowerPriority,
+			}).
 			Obj()
 		util.CreateClusterQueuesAndWaitForActive(ctx, k8sWorker2Client, worker2Cq)
 
@@ -829,29 +835,29 @@ var _ = ginkgo.Describe("MultiKueue", func() {
 			managerHighWl := &kueue.Workload{}
 			workerHighWorkload := &kueue.Workload{}
 
-				ginkgo.By("Checking that the high-priority workload is created and admitted in the manager cluster", func() {
-					gomega.Eventually(func(g gomega.Gomega) {
-						g.Expect(k8sManagerClient.Get(ctx, highWlKey, managerHighWl)).To(gomega.Succeed())
-						g.Expect(workload.IsAdmitted(managerHighWl)).To(gomega.BeTrue())
-					}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
-				})
-
-			ginkgo.By("Checking that the high-priority workload is created in worker2 and not in worker1, and that its spec matches the manager workload", func() {
+			ginkgo.By("Checking that the high-priority workload is created and admitted in the manager cluster", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
-					g.Expect(k8sWorker2Client.Get(ctx, highWlKey, workerHighWorkload)).To(gomega.Succeed())
+					g.Expect(k8sManagerClient.Get(ctx, highWlKey, managerHighWl)).To(gomega.Succeed())
+					g.Expect(workload.IsAdmitted(managerHighWl)).To(gomega.BeTrue())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
+			})
+
+			ginkgo.By("Checking that the high-priority workload is created in worker1 and not in worker2, and that its spec matches the manager workload", func() {
+				gomega.Eventually(func(g gomega.Gomega) {
+					g.Expect(k8sWorker1Client.Get(ctx, highWlKey, workerHighWorkload)).To(gomega.Succeed())
 					g.Expect(workload.IsAdmitted(workerHighWorkload)).To(gomega.BeTrue())
 					g.Expect(workerHighWorkload.Spec).To(gomega.BeComparableTo(managerHighWl.Spec))
-					g.Expect(k8sWorker1Client.Get(ctx, highWlKey, &kueue.Workload{})).To(utiltesting.BeNotFoundError())
+					g.Expect(k8sWorker2Client.Get(ctx, highWlKey, &kueue.Workload{})).To(utiltesting.BeNotFoundError())
 				}, util.Timeout, util.Interval).Should(gomega.Succeed())
 			})
 
-				ginkgo.By("Checking that the low-priority workload is preempted in the manager cluster", func() {
-					gomega.Eventually(func(g gomega.Gomega) {
-						g.Expect(k8sManagerClient.Get(ctx, lowWlKey, managerLowWl)).To(gomega.Succeed())
-						g.Expect(workload.IsEvicted(managerLowWl)).To(gomega.BeTrue())
-						g.Expect(managerLowWl.Status.Conditions).To(utiltesting.HaveConditionStatusTrue(kueue.WorkloadPreempted))
-					}, util.Timeout, util.Interval).Should(gomega.Succeed())
-				})
+			ginkgo.By("Checking that the low-priority workload is preempted in the manager cluster", func() {
+				gomega.Eventually(func(g gomega.Gomega) {
+					g.Expect(k8sManagerClient.Get(ctx, lowWlKey, managerLowWl)).To(gomega.Succeed())
+					g.Expect(workload.IsEvicted(managerLowWl)).To(gomega.BeTrue())
+					g.Expect(managerLowWl.Status.Conditions).To(utiltesting.HaveConditionStatusTrue(kueue.WorkloadPreempted))
+				}, util.Timeout, util.Interval).Should(gomega.Succeed())
+			})
 
 			ginkgo.By("Checking that the low-priority workload is deleted from the worker clusters", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
@@ -918,16 +924,16 @@ var _ = ginkgo.Describe("MultiKueue", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sManagerClient.Get(ctx, highWlKey, managerHighWl)).To(gomega.Succeed())
 					g.Expect(workload.IsAdmitted(managerHighWl)).To(gomega.BeTrue())
-				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
-			ginkgo.By("Checking that the high-priority workload is created in worker1 and not in worker2, and that its spec matches the manager workload", func() {
+			ginkgo.By("Checking that the high-priority workload has preempted the low-priority job on worker2 and is not present on worker1, and that its spec matches the manager workload", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
-					g.Expect(k8sWorker1Client.Get(ctx, highWlKey, workerHighWorkload)).To(gomega.Succeed())
+					g.Expect(k8sWorker2Client.Get(ctx, highWlKey, workerHighWorkload)).To(gomega.Succeed())
 					g.Expect(workload.IsAdmitted(workerHighWorkload)).To(gomega.BeTrue())
 					g.Expect(workerHighWorkload.Spec).To(gomega.BeComparableTo(managerHighWl.Spec))
-					g.Expect(k8sWorker2Client.Get(ctx, highWlKey, &kueue.Workload{})).To(utiltesting.BeNotFoundError())
-				}, util.Timeout, util.Interval).Should(gomega.Succeed())
+					g.Expect(k8sWorker1Client.Get(ctx, highWlKey, &kueue.Workload{})).To(utiltesting.BeNotFoundError())
+				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			ginkgo.By("Checking that the low-priority workload was evicted and backed off (is no longer admitted)", func() {
@@ -2481,7 +2487,6 @@ app = HelloWorld.bind()`,
 					g.Expect(unaffectedWorkerClient.Get(ctx, unaffectedWlKey, unaffectedWl)).To(gomega.Succeed())
 					g.Expect(unaffectedWl.Status.Conditions).To(utiltesting.HaveConditionStatusTrue(kueue.WorkloadAdmitted))
 					g.Expect(workload.IsEvicted(unaffectedWl)).To(gomega.BeFalse())
-
 				}, util.ConsistentDuration, util.Interval).Should(gomega.Succeed())
 			})
 
@@ -2501,7 +2506,6 @@ app = HelloWorld.bind()`,
 					// Evicted workload is requeued and pending on worker 2
 					g.Expect(k8sWorker2Client.Get(ctx, evictedWlKey, evictedWl)).To(gomega.Succeed())
 					g.Expect(evictedWl.Status.Conditions).To(utiltesting.HaveConditionStatusFalse(kueue.WorkloadQuotaReserved))
-
 				}, util.ConsistentDuration, util.Interval).Should(gomega.Succeed())
 			})
 		})
