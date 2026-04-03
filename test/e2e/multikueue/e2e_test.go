@@ -2487,7 +2487,6 @@ app = HelloWorld.bind()`,
 					g.Expect(unaffectedWorkerClient.Get(ctx, unaffectedWlKey, unaffectedWl)).To(gomega.Succeed())
 					g.Expect(unaffectedWl.Status.Conditions).To(utiltesting.HaveConditionStatusTrue(kueue.WorkloadAdmitted))
 					g.Expect(workload.IsEvicted(unaffectedWl)).To(gomega.BeFalse())
-
 				}, util.ConsistentDuration, util.Interval).Should(gomega.Succeed())
 			})
 
@@ -2507,7 +2506,6 @@ app = HelloWorld.bind()`,
 					// Evicted workload is requeued and pending on worker 2
 					g.Expect(k8sWorker2Client.Get(ctx, evictedWlKey, evictedWl)).To(gomega.Succeed())
 					g.Expect(evictedWl.Status.Conditions).To(utiltesting.HaveConditionStatusFalse(kueue.WorkloadQuotaReserved))
-
 				}, util.ConsistentDuration, util.Interval).Should(gomega.Succeed())
 			})
 		})
