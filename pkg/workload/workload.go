@@ -1538,6 +1538,9 @@ func admissionChecksForAdmission(log logr.Logger, acs map[kueue.AdmissionCheckRe
 		})
 	}
 
+	// Some tests allow for admissions not to be assigned any flavors.
+	// To ensure those tests work as before: flavorless Admissions are assigned/expected to fulfill all Admission Checks.
+	// Issue to address the matter further: https://github.com/kubernetes-sigs/kueue/issues/10316
 	log.V(3).Info(
 		"Admission has no Flavors; assigning all checks",
 		"AdmissionChecks",
