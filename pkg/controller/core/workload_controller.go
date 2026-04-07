@@ -738,12 +738,7 @@ func (r *WorkloadReconciler) reconcileCheckBasedEviction(ctx context.Context, wl
 }
 
 func (r *WorkloadReconciler) reconcileSyncAdmissionChecks(ctx context.Context, wl *kueue.Workload, cq *kueue.ClusterQueue) (bool, error) {
-	log := ctrl.LoggerFrom(ctx).WithValues(
-		"Workload",
-		klog.KObj(wl),
-		"Cluster Queue",
-		klog.KObj(cq),
-	)
+	log := ctrl.LoggerFrom(ctx)
 	admissionChecks := workload.AdmissionChecksForWorkload(log, wl, cq)
 	newChecks, shouldUpdate := syncAdmissionCheckConditions(wl.Status.AdmissionChecks, admissionChecks, r.clock)
 	if shouldUpdate {
