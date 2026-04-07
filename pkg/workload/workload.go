@@ -1504,12 +1504,6 @@ type flavorSet = sets.Set[kueue.ResourceFlavorReference]
 // AdmissionChecksForWorkload returns AdmissionChecks that should be assigned to a specific Workload based on
 // ClusterQueue configuration
 func AdmissionChecksForWorkload(log logr.Logger, wl *kueue.Workload, cq *kueue.ClusterQueue) sets.Set[kueue.AdmissionCheckReference] {
-	log = log.WithValues(
-		"Workload",
-		klog.KObj(wl),
-		"ClusterQueue",
-		klog.KObj(cq),
-	)
 	allChecks := admissioncheck.NewAdmissionChecks(cq)
 
 	if wl.Status.Admission != nil {
