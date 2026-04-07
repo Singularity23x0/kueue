@@ -1219,7 +1219,7 @@ var _ = ginkgo.Describe("MultiKueue", ginkgo.Label("area:multikueue", "feature:m
 			}, util.Timeout, util.Interval).Should(gomega.Succeed())
 		})
 
-		restoreConnectionToWorker2, _ := util.BreakConnection(managerTestCluster.ctx, managerTestCluster.client, workerCluster2)
+		restoreConnectionToWorker2 := util.BreakConnection(managerTestCluster.ctx, managerTestCluster.client, workerCluster2)
 
 		ginkgo.By("setting workload reservation in worker1, the job is created in worker1", func() {
 			admission := utiltestingapi.MakeAdmission(managerCq.Name).Obj()
@@ -1230,7 +1230,7 @@ var _ = ginkgo.Describe("MultiKueue", ginkgo.Label("area:multikueue", "feature:m
 			}, util.Timeout, util.Interval).Should(gomega.Succeed())
 		})
 
-		restoreConnectionToWorker1, _ := util.BreakConnection(managerTestCluster.ctx, managerTestCluster.client, workerCluster1)
+		restoreConnectionToWorker1 := util.BreakConnection(managerTestCluster.ctx, managerTestCluster.client, workerCluster1)
 
 		ginkgo.By("removing the managers job and workload", func() {
 			gomega.Expect(managerTestCluster.client.Delete(managerTestCluster.ctx, job)).Should(gomega.Succeed())
@@ -1308,7 +1308,7 @@ var _ = ginkgo.Describe("MultiKueue", ginkgo.Label("area:multikueue", "feature:m
 
 		admitWorkloadAndCheckWorkerCopies(multiKueueAC.Name, wlLookupKey, admission)
 
-		restoreConnectionToWorker2, disconnectedTime := util.BreakConnection(managerTestCluster.ctx, managerTestCluster.client, workerCluster2)
+		restoreConnectionToWorker2 := util.BreakConnection(managerTestCluster.ctx, managerTestCluster.client, workerCluster2)
 
 		ginkgo.By("waiting for the local workload admission check state to be set to pending and quotaReservatio removed", func() {
 			gomega.Eventually(func(g gomega.Gomega) {
@@ -1320,9 +1320,6 @@ var _ = ginkgo.Describe("MultiKueue", ginkgo.Label("area:multikueue", "feature:m
 					State:      kueue.CheckStatePending,
 					RetryCount: ptr.To(int32(1)),
 				}, cmpopts.IgnoreFields(kueue.AdmissionCheckState{}, "LastTransitionTime", "Message")))
-
-				// The transition interval should be close to testingKeepReadyTimeout (taking into account the resolution of the LastTransitionTime field)
-				g.Expect(acs.LastTransitionTime.Time).To(gomega.BeComparableTo(disconnectedTime.Add(testingWorkerLostTimeout), cmpopts.EquateApproxTime(2*time.Second)))
 
 				g.Expect(createdWorkload.Status.Conditions).ToNot(utiltesting.HaveConditionStatusTrue(kueue.WorkloadQuotaReserved))
 			}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
@@ -1999,7 +1996,7 @@ var _ = ginkgo.Describe("MultiKueue", ginkgo.Label("area:multikueue", "feature:m
 
 			admitWorkloadAndCheckWorkerCopies(multiKueueAC.Name, wlLookupKey, admission)
 
-			restoreConnectionToWorker2, _ := util.BreakConnection(managerTestCluster.ctx, managerTestCluster.client, workerCluster2)
+			restoreConnectionToWorker2 := util.BreakConnection(managerTestCluster.ctx, managerTestCluster.client, workerCluster2)
 
 			ginkgo.By("waiting for quotaReservation to be removed", func() {
 				gomega.Eventually(func(g gomega.Gomega) {

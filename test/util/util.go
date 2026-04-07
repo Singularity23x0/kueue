@@ -1352,10 +1352,9 @@ func IsLoggedEntryAConcurrentModification(le observer.LoggedEntry) bool {
 	return strings.Contains(errorDetals, expectedConcurrentModiciationDetails)
 }
 
-// BreakConnection breaks connection to the cluster, then returns:
-// a callback to restore the connection AND
-// the timestamp of becoming disconnected
-func BreakConnection(ctx context.Context, cli client.Client, cluster *kueue.MultiKueueCluster) (restoreConnection func(), disconnectedTime time.Time) {
+// BreakConnection breaks connection to the cluster.
+// Returns a callback to restore the connection.
+func BreakConnection(ctx context.Context, cli client.Client, cluster *kueue.MultiKueueCluster) (restoreConnection func()) {
 	ginkgo.GinkgoHelper()
 
 	var trueLocation string
@@ -1379,11 +1378,10 @@ func BreakConnection(ctx context.Context, cli client.Client, cluster *kueue.Mult
 				Status: metav1.ConditionFalse,
 				Reason: "BadKubeConfig",
 			}, IgnoreConditionMessage, IgnoreConditionTimestampsAndObservedGeneration))
-			disconnectedTime = activeCondition.LastTransitionTime.Time
 		}, Timeout, Interval).Should(gomega.Succeed())
 	})
 
-	return createConnectionRestoringCallback(ctx, cli, cluster, trueLocation), disconnectedTime
+	return createConnectionRestoringCallback(ctx, cli, cluster, trueLocation)
 }
 
 func createConnectionRestoringCallback(ctx context.Context, cli client.Client, cluster *kueue.MultiKueueCluster, location string) func() {

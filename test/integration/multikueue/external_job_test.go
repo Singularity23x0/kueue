@@ -346,7 +346,7 @@ var _ = ginkgo.Describe("MultiKueue", ginkgo.Label("area:multikueue", "feature:m
 				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
-			restoreConnectionToWorker2, _ := util.BreakConnection(managerTestCluster.ctx, managerTestCluster.client, workerCluster2)
+			restoreConnectionToWorker2 := util.BreakConnection(managerTestCluster.ctx, managerTestCluster.client, workerCluster2)
 
 			ginkgo.By("setting workload reservation in worker1, the raycluster is created in worker1", func() {
 				admission := utiltestingapi.MakeAdmission(managerCq.Name).PodSets(
@@ -367,7 +367,7 @@ var _ = ginkgo.Describe("MultiKueue", ginkgo.Label("area:multikueue", "feature:m
 				}, util.Timeout, util.Interval).Should(gomega.Succeed())
 			})
 
-			restoreConnectionToWorker1, _ := util.BreakConnection(managerTestCluster.ctx, managerTestCluster.client, workerCluster1)
+			restoreConnectionToWorker1 := util.BreakConnection(managerTestCluster.ctx, managerTestCluster.client, workerCluster1)
 
 			ginkgo.By("removing the managers raycluster and workload", func() {
 				gomega.Expect(managerTestCluster.client.Delete(managerTestCluster.ctx, raycluster)).Should(gomega.Succeed())
