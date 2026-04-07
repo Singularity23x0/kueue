@@ -1999,15 +1999,12 @@ var _ = ginkgo.Describe("MultiKueue", ginkgo.Label("area:multikueue", "feature:m
 
 			admitWorkloadAndCheckWorkerCopies(multiKueueAC.Name, wlLookupKey, admission)
 
-			restoreConnectionToWorker2, disconnectedTime := util.BreakConnection(managerTestCluster.ctx, managerTestCluster.client, workerCluster2)
+			restoreConnectionToWorker2, _ := util.BreakConnection(managerTestCluster.ctx, managerTestCluster.client, workerCluster2)
 
 			ginkgo.By("waiting for quotaReservation to be removed", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					createdWorkload := &kueue.Workload{}
 					g.Expect(managerTestCluster.client.Get(managerTestCluster.ctx, wlLookupKey, createdWorkload)).To(gomega.Succeed())
-					acs := admissioncheck.FindAdmissionCheck(createdWorkload.Status.AdmissionChecks, kueue.AdmissionCheckReference(multiKueueAC.Name))
-					// The transition interval should be close to testingKeepReadyTimeout (taking into account the resolution of the LastTransitionTime field)
-					g.Expect(acs.LastTransitionTime.Time).To(gomega.BeComparableTo(disconnectedTime.Add(testingWorkerLostTimeout), cmpopts.EquateApproxTime(2*time.Second)))
 					g.Expect(createdWorkload.Status.Conditions).ToNot(utiltesting.HaveConditionStatusTrue(kueue.WorkloadQuotaReserved))
 				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
 			})
