@@ -30,27 +30,27 @@
 The Workload status in the MultiKueue Manager Cluster must reflect the true state of the workload derived from the Worker Clusters,
 including a human-readable message explaining the state (e.g., "Waiting for quota in cluster X").
 
-This KEP focuses on a mechanism to provide such high-level summary in the form of a new Workload Status Condition - the **MultiKueueWorkload** condition.
+This KEP focuses on a mechanism to provide such a high-level summary in the form of a new Workload Status Condition - the **MultiKueueWorkload** condition.
 The condition:
 1. Will be populated for workloads created on the Manager Cluster.
-1. Will provide a high-level, human-readable message explaining the state of the Manager Workload.
-1. Will provide insights into the Workload's progress throughout its **whole lifecycle**.
-1. Will aggregate the information from all the Remote Workloads dispatched by MultiKueue to Worker Clusters for the subject Manager Workload.
+2. Will provide a high-level, human-readable message explaining the state of the Manager Workload.
+3. Will provide insights into the Workload's progress throughout its **whole lifecycle**.
+4. Will aggregate information from all the Remote Workloads dispatched by MultiKueue to Worker Clusters for the subject Manager Workload.
 
 ## Motivation
 
-Currently, the Workload Status subresource is missing key information aggregating data from across its remote counterparts on Worker Clusters.
-The existing conditions do not track the process of dispatching Remote Workloads to Workers, obfuscating the details of MultiKueue's most critical part of the workload's execution.
+Currently, the Workload status subresource is missing key information aggregating data from its remote counterparts on Worker Clusters.
+The existing conditions do not track the process of dispatching Remote Workloads to Workers, obfuscating the details of the most critical part of MultiKueue wWrkload's execution.
 This forces users to search across all Worker Clusters to be able to see the big picture.
 
 Moreover, it does not natively support a contract defining a human-readable execution status.
-It instead relies on a list of Conditions and support information provided inside the WorkloadStatus field for the user to piece the actual global state of the underlying job's execution together on their own.
+It instead relies on a list of conditions and supporting information provided inside the WorkloadStatus field for users to piece together the actual global state of the underlying job's execution on their own.
 
-To amend this, we need a way to present the user with a clearly defined, user-readable summary of the Global State, which aggregates information from across all the clusters of the MultiKueue environment.
+To address this, we need a way to present users with a clearly defined, human-readable summary of the global state, which aggregates information from all clusters in the MultiKueue environment.
 
-If nothing is implemented, the users will remain forced to rely on:
-* the conditions of the Manager Workload, which are misaligned and non-representative of all the extensive logic happening in MultiKueue,
-* manually querying and aggregating the conditions of Remote Workload across all Registered Workers; this covers a lot of distributed data; users are missing the core information of which Workers are eligible for dispatch by virtue of being put forward by the Dispatch Strategy.
+If nothing is implemented, users will remain forced to rely on:
+* the conditions of the Manager Workload, which are misaligned and non-representative of the extensive logic in MultiKueue,
+* manually querying and aggregating the conditions of Remote Workloads across all registered workers; this covers a lot of distributed data, and users lack core information about which workers are eligible for dispatch by virtue of being put forward by the dispatch strategy.
 
 ### Goals
 
@@ -72,7 +72,7 @@ The lifecycle of the Manager Workload will be split into the following **MultiKu
 * **RUNNING** - local workload is admitted (has the admitted condition); a single worker was selected; the remote is admitted (has the admitted condition); the underlying job will attempt to execute; if it finishes we transition into the SUCCESS/FAILED state, otherwise we back-off,
 * **WORKER_SELECTED** - local workload is admitted (has the admitted condition); a single worker was selected; the remote has currently received quota but is not admitted yet;
 this is possible if the MultiKueueWaitForWorkloadAdmitted feature is disabled,
-* **WAITING_FOR_WORKER** -  quota reserved on the local workload; dispatching remotes to nominated workers and waiting for one of them to be selected - a worker will be selected once the remote achieves a state allowing it to graduate to either the WORKER_SELECTED (recieving quota reservation, MultiKueueWaitForWorkloadAdmitted feature gate disabled) or the RUNNING (workload recieves the admitted condition set to true) state,
+* **WAITING_FOR_WORKER** -  quota reserved on the local workload; dispatching remotes to nominated workers and waiting for one of them to be selected - a worker will be selected once the remote achieves a state allowing it to graduate to either the WORKER_SELECTED (receiving quota reservation, MultiKueueWaitForWorkloadAdmitted feature gate disabled) or the RUNNING (workload receives the admitted condition set to true) state,
 * **WAITING_FOR_WORKER_NOMINATION** - specific to a non-primary component workload in the multi-workload-resource handling scenario;  quota reserved on the component workload; the component workload is waiting for the primary to select a worker to create a remote on,
 * **WAITING_FOR_MANAGER_QUOTA** - local workload is waiting to be granted a quota reservation on the Manager Cluster.
 
@@ -85,8 +85,8 @@ For each MultiKueueGlobalStatus a message - **MultiKueueGlobalStatusMessage** - 
 * WAITING_FOR_WORKER:
   * Default:
   `Workload awaiting admission on one of the registered Workers. <number of remotes> Remote Workloads created.`
-  * Non primary component workload:
-  `<multi-workload resource type name> Workload awaiting admission on Worker Cluster: <worker selected by the primary local workload>, selected by the <multi-workload resource type name> Primary Workload: <primary local workload reference>.`
+  * Non-primary component workload:
+  `<multi-workload resource type name> Workload awaiting admission on Worker Cluster: <worker selected by the primary local workload>, selected by the <multi-workload resource type name> primary workload: <primary local workload reference>.`
 * WAITING_FOR_WORKER_NOMINATION: `<multi-workload resource type name> Workload waiting for <primary local workload reference> to select a Worker Cluster.`
 * WAITING_FOR_MANAGER_QUOTA: `Workload awaiting quota on the Manager Cluster.`
 
@@ -105,7 +105,7 @@ The condition will be gated behind the **MultiKueueGlobalStatusCondition** featu
 #### Story 1
 
 I want to get an idea of when my job will be admitted. Has it already received quota on the manager?
-Is it being dispatched? If yes - what are the workers has it been dispatched to, so that I can check the status of some or all of them for how my job is doing there?
+Is it being dispatched? If yes - what are the workers it has been dispatched to, so that I can check the status of some or all of them for how my job is doing there?
 Or maybe it is already running on a specific worker? If yes - which one?
 
 #### Story 2
@@ -117,8 +117,8 @@ Are remotes being created? Have they been dispatched to all workers? What is the
 
 This proposal is limited to only providing the user with a high-level summary.
 This is a minimum value proposition, lacking in a few key areas:
-* In the WAITING_FOR_WORKER state we only provide a miniscule summary of what is happening on the Workers. In reality, this state is much more complex than the messages we propose can describe and could greatly benefiot form being accompanied by a set of aggregations describing in greater detail what is the status of each Remote Workload.
-* In an effort ot keep the condition message concise, we ware limited in how much data relevant to the user we can provide.
+* In the WAITING_FOR_WORKER state we only provide a miniscule summary of what is happening on the Workers. In reality, this state is much more complex than the messages we propose can describe and could greatly benefit from being accompanied by a set of aggregations describing in greater detail what is the status of each Remote Workload.
+* In an effort to keep the condition message concise, we are limited in how much data relevant to the user we can provide.
 
 In the [alternatives section](#global-status-summary) we briefly describe an expanded Global Status Summary proposal to be revisited in the future if the new condition by itself is deemed insufficient.
 
@@ -139,7 +139,7 @@ The new condition type will be defined alongside existing ones in the [workload 
 const (
   // ...
 
-  // MultiKueueWorkload mean the workload is a MultiKueue Workload created on a Manager Cluster.
+  // MultiKueueWorkload means the workload is a MultiKueue Workload created on a Manager Cluster.
   // The possible reasons depend on the state of the MK Workload:
   // - SUCCESS,
   // - FAILED,
@@ -271,7 +271,7 @@ This approach can be considered as a natural extension of the one proposed in th
 
 Instead of persisting the data in the Manager Cluster and calculating it in the MultiKueue Controller, we instead provide it on demand via the Visibility API.
 
-This approach is ill advised as the data is expected to be stable and using the Visibility API is not necessary.
+This approach is ill-advised as the data is expected to be stable and using the Visibility API is not necessary.
 
 ### Consolidated Workload State
 
