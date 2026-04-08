@@ -40,7 +40,7 @@ The condition:
 ## Motivation
 
 Currently, the Workload Status subresource is missing key information aggregating data from across its remote counterparts on Worker Clusters.
-The existing conditions do not track the process of dispatching Remote Workloads to Workers, obstructing the details of MultiKueue's most critical part of the workload's execution.
+The existing conditions do not track the process of dispatching Remote Workloads to Workers, obfuscating the details of MultiKueue's most critical part of the workload's execution.
 This forces users to search across all Worker Clusters to be able to see the big picture.
 
 Moreover, it does not natively support a contract defining a human-readable execution status.
