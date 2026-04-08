@@ -73,7 +73,7 @@ The lifecycle of the Manager Workload will be split into the following **MultiKu
 * **WORKER_SELECTED** - local workload is admitted (has the admitted condition); a single worker was nominated; the remote has currently received quota but is not admitted yet;
 this is possible if the MultiKueueWaitForWorkloadAdmitted feature is disabled; it can also occur as a consequence of graduating from the WAITING_FOR_WORKER state when the behavior described in [#9338](https://github.com/kubernetes-sigs/kueue/issues/9338) occurs,
 * **WAITING_FOR_WORKER** -  quota reserved on the local workload; dispatching remotes to eligible workers and waiting  to nominate one of them; a worker will be nominated once the remote achieves a state allowing it to graduate to either the WORKER_SELECTED or the RUNNING state,
-Note: Local workload can be admitted (have the admitted condition), as described in #9338 (when MultiKueue admits a workload on a worker but then it gets preempted there with the MultiKueueRedoAdmissionOnEvictionInWorker gate enabled).
+Note: Local workload can be admitted (have the admitted condition), as described in [#9338](https://github.com/kubernetes-sigs/kueue/issues/9338) (when MultiKueue admits a workload on a worker but then it gets preempted there with the MultiKueueRedoAdmissionOnEvictionInWorker gate enabled).
 * **WAITING_FOR_WORKER_NOMINATION** - specific to a non-primary component workload in the multi-workload-resource handling scenario;  quota reserved on the component workload; the component workload is waiting for the primary to nominate a worker to create a remote on,
 * **WAITING_FOR_QUOTA** - local workload is waiting to be granted a quota reservation on the Manager Cluster.
 
