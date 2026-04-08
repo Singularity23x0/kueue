@@ -50,7 +50,7 @@ To amend this, we need a way to present the user with a clearly defined, user-re
 
 If nothing is implemented, the users will remain forced to rely on:
 * the conditions of the Manager Workload, which are misaligned and non-representative of all the extensive logic happening in MultiKueue,
-* manually querying and aggregating the conditions of Remote Workload across all Registered Workers; this covers a lot of distributed data; users are missing the core information of which Workers are eligible for distribution by virtue of being put forward by the Distribution Strategy.
+* manually querying and aggregating the conditions of Remote Workload across all Registered Workers; this covers a lot of distributed data; users are missing the core information of which Workers are eligible for dispatch by virtue of being put forward by the Dispatch Strategy.
 
 ### Goals
 
