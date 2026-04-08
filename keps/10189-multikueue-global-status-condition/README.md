@@ -74,7 +74,7 @@ The lifecycle of the Manager Workload will be split into the following **MultiKu
 this is possible if the MultiKueueWaitForWorkloadAdmitted feature is disabled,
 * **WAITING_FOR_WORKER** -  quota reserved on the local workload; dispatching remotes to nominated workers and waiting for one of them to be selected - a worker will be selected once the remote achieves a state allowing it to graduate to either the WORKER_SELECTED (recieving quota reservation, MultiKueueWaitForWorkloadAdmitted feature gate disabled) or the RUNNING (workload recieves the admitted condition set to true) state,
 * **WAITING_FOR_WORKER_NOMINATION** - specific to a non-primary component workload in the multi-workload-resource handling scenario;  quota reserved on the component workload; the component workload is waiting for the primary to select a worker to create a remote on,
-* **WAITING_FOR_QUOTA** - local workload is waiting to be granted a quota reservation on the Manager Cluster.
+* **WAITING_FOR_MANAGER_QUOTA** - local workload is waiting to be granted a quota reservation on the Manager Cluster.
 
 For each MultiKueueGlobalStatus a message - **MultiKueueGlobalStatusMessage** - will be defined:
 * SUCCESS: `Workload has finished successfully on Worker Cluster: <worker cluster reference>.`
@@ -88,7 +88,7 @@ For each MultiKueueGlobalStatus a message - **MultiKueueGlobalStatusMessage** - 
   * Non primary component workload:
   `<multi-workload resource type name> Workload awaiting admission on Worker Cluster: <worker selected by the primary local workload>, selected by the <multi-workload resource type name> Primary Workload: <primary local workload reference>.`
 * WAITING_FOR_WORKER_NOMINATION: `<multi-workload resource type name> Workload waiting for <primary local workload reference> to select a Worker Cluster.`
-* WAITING_FOR_QUOTA: `Workload awaiting quota on the Manager Cluster.`
+* WAITING_FOR_MANAGER_QUOTA: `Workload awaiting quota on the Manager Cluster.`
 
 The **MultiKueueWorkload** condition will be defined as:
 |Field|Value|
@@ -148,7 +148,7 @@ const (
   // - WORKER_SELECTED,
   // - WAITING_FOR_WORKER,
   // - WAITING_FOR_WORKER_NOMINATION,
-  // - WAITING_FOR_QUOTA.
+  // - WAITING_FOR_MANAGER_QUOTA.
   MultiKueueWorkload = "MultiKueueWorkload"
 
   // ...
@@ -186,7 +186,7 @@ const (
   WaitingForWorkerNomination = "WAITING_FOR_WORKER_NOMINATION"
 
   // WaitingForQuota state means the workload is currently in the "Pending" state on the Manager Cluster (does not currently hold any quota reservations).
-  WaitingForQuota = "WAITING_FOR_QUOTA"
+  WaitingForQuota = "WAITING_FOR_MANAGER_QUOTA"
 )
 
 ```
@@ -288,6 +288,6 @@ The proposed set of states would be as follows:
 | ADMISSION PENDING | Local workload has the admitted condition. Worker selected and remote in state ADMISSION PENDING (QuotaReserved). | Workload has an admission but does not have the admitted condition. This means the workload received a quota reservation but not all admission checks have reached the Ready state yet. | WORKER_SELECTED | QuotaReserved |
 | WAITING FOR WORKER | Local has the admission but not the admitted condition. Dispatching remotes to one or more workers. All remotes are PENDING (Pending) or ADMISSION PENDING (QuotaReserved). | — | WAITING_FOR_WORKER | — |
 | WAITING FOR WORKER NOMINATION | Local workload is a non-primary workload in a group of composite workloads. Local has got an admission but not the admitted condition. Primary has not selected a worker yet. | — | WAITING_FOR_WORKER_NOMINATION | — |
-| PENDING | Local workload does not have an admission. No remotes exist. | Workload does not have an admission. | WAITING_FOR_QUOTA | Pending |
+| PENDING | Local workload does not have an admission. No remotes exist. | Workload does not have an admission. | WAITING_FOR_MANAGER_QUOTA | Pending |
 
 This approach risks being confusing to users, as the Workload States shift meanings significantly depending on whether the Workload is a Manager Workload or an Individual (remote or non-multikueue) Workload.
