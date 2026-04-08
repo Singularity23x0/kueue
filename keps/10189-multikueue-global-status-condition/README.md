@@ -27,7 +27,7 @@
 
 ## Summary
 
-The Workload status in queue in the MultiKueue Manager Cluster must reflect the true state of the workload derived from the remote cluster,
+The Workload status in the MultiKueue Manager Cluster must reflect the true state of the workload derived from the Worker Clusters,
 including a human-readable message explaining the state (e.g., "Waiting for quota in cluster X").
 
 This KEP focuses on a mechanism to provide such high-level summary in the form of a new Workload Status Condition - the **MultiKueueWorkload** condition.
