@@ -283,4 +283,6 @@ The proposed set of states would be as follows:
 | WAITING FOR WORKER NOMINATION | Local workload is a non-primary workload in a group of composite workloads. Local has got an admission but not the admitted condition. Primary has not selected a worker yet. | — | WAITING_FOR_WORKER_NOMINATION | — |
 | PENDING | Local workload does not have an admission. No remotes exist. | Workload does not have an admission. | WAITING_FOR_MANAGER_QUOTA | Pending |
 
-This approach risks being confusing to users, as the Workload States shift meanings significantly depending on whether the Workload is a Manager Workload or an Individual (remote or non-multikueue) Workload.
+This consolidated set of statuses could then be used to populate a new, stand-alone field in the WorkloadStatus, allowing for a generic solution providing a high level status summary for both individual and multikueue workloads.
+
+The main caveat here is that this approach risks being confusing to users, as the Workload States shift meanings significantly depending on whether the Workload is a Manager Workload or an Individual (remote or non-multikueue) Workload.
