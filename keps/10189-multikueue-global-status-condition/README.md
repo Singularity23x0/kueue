@@ -178,8 +178,8 @@ const (
   // and is waiting for the primary component workload to select a worker to dispatch a remote to.
   WaitingForWorkerNomination = "WAITING_FOR_WORKER_NOMINATION"
 
-  // WaitingForQuota state means the workload is currently in the "Pending" state on the Manager Cluster (does not currently hold any quota reservations).
-  WaitingForQuota = "WAITING_FOR_MANAGER_QUOTA"
+  // WaitingForManagerQuota state means the workload is currently in the "Pending" state on the Manager Cluster (does not currently hold any quota reservations).
+  WaitingForManagerQuota = "WAITING_FOR_MANAGER_QUOTA"
 )
 
 ```
