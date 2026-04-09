@@ -110,7 +110,7 @@ Are remotes being created? Have they been dispatched to all workers? What is the
 
 This proposal is limited to only providing the user with a high-level summary.
 This is a minimum value proposition, lacking in a few key areas:
-* In the WAITING_FOR_WORKER state we only provide a miniscule summary of what is happening on the Workers. In reality, this state is much more complex than the messages we propose can describe and could greatly benefit from being accompanied by a set of aggregations describing in greater detail what is the status of each Remote Workload.
+* In the WAITING_FOR_WORKER state we only provide a minuscule summary of what is happening on the Workers. In reality, this state is much more complex than the messages we propose can describe and could greatly benefit from being accompanied by a set of aggregations describing in greater detail what is the status of each Remote Workload.
 * In an effort to keep the condition message concise, we are limited in how much data relevant to the user we can provide.
 
 In the [alternatives section](#global-status-summary) we briefly describe an expanded Global Status Summary proposal to be revisited in the future if the new condition by itself is deemed insufficient.
@@ -283,6 +283,40 @@ The proposed set of states would be as follows:
 | WAITING FOR WORKER NOMINATION | Local workload is a non-primary workload in a group of composite workloads. Local has got an admission but not the admitted condition. Primary has not selected a worker yet. | — | WAITING_FOR_WORKER_NOMINATION | — |
 | PENDING | Local workload does not have an admission. No remotes exist. | Workload does not have an admission. | WAITING_FOR_MANAGER_QUOTA | Pending |
 
-This consolidated set of statuses could then be used to populate a new, stand-alone field in the WorkloadStatus, allowing for a generic solution providing a high level status summary for both individual and multikueue workloads.
+This consolidated set of statuses could then be used to populate a new, stand-alone field in the WorkloadStatus, allowing for a generic solution providing a high-level status summary for both individual and MultiKueue workloads.
 
-The main caveat here is that this approach risks being confusing to users, as the Workload States shift meanings significantly depending on whether the Workload is a Manager Workload or an Individual (remote or non-multikueue) Workload.
+The main caveat here is that this approach risks being confusing to users, as the Workload States shift meanings significantly depending on whether the Workload is a Manager Workload or an Individual (remote or non-MultiKueue) Workload.
+
+### Granular Conditions
+
+Instead of defining a single Condition, we could provide one or more Granular Conditions, each servicing the purpose of supplying data missing from the WorkloadStatus, allowing to piece the Global Status of a MultiKueue workload by the user on their own.
+
+#### AdmittedInWorker Condition
+
+|Corresponding MultiKueueGlobalStatus|AdmittedInWorker Condition Value|
+|---|---|
+|SUCCESS|nil|
+|FAILED|nil|
+|INACTIVE|**State**: False, **Reason**: WorkloadInactive|
+|RUNNING|**State**: True|
+|WORKER_SELECTED|**State**: False|
+|WAITING_FOR_WORKER|**State**: False|
+|WAITING_FOR_WORKER_NOMINATION|**State**: False|
+|WAITING_FOR_MANAGER_QUOTA|**State**: False|
+
+This alternative reduces data duplication from listing the SUCCESS and FAILED states.
+Outside of that, it closely resembles the proposed solution, especially given that both Reason and Message values can be copied directly in all cases but the INACTIVE state one.
+
+#### Condition per status
+
+We can define multiple conditions providing users with data they lack to establish the Global Status of a MultiKueue workload.
+
+These conditions could be one or more of:
+* AdmittedInWorker - set to true when in the RUNNING status. The message would identify the worker.
+* QuotaReservedInWorker - set to true when in the WORKER_SELECTED status. The message would identify the worker.
+* WorkerNominated - set to False when no worker was nominated for dispatch yet. Set to True once a single worker is nominated. This can mean entering the RUNNING or WORKER_SELECTED states, as well as cover exiting the WAITING_FOR_WORKER_NOMINATION state in case of non-primary composite workloads. The reason and message would identify which of these 3 cases we encountered.
+* MultiKueueManagerWorkload - present and set to True only for MultiKueue Manager Workloads, ensuring we are always aware if the workload in question is a Manager Workload or not.
+
+#### Disadvantages
+
+The main issue here, is that while we ensure the status covers all multi-kueue cases, reading the state of the job's execution remains complex. We still have to read an understand a multitude of conditions and status information to piece together the inner workings of MultiKueue, isntead of being provided with a clear, human-readable summary. This is especially apparrent when considering the latter variant, where the number of added conditions expands to 3 or 4.
