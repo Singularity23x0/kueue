@@ -39,18 +39,11 @@ The condition:
 
 ## Motivation
 
-Currently, the Workload status subresource is missing key information aggregating data from its remote counterparts on Worker Clusters.
-The existing conditions do not track the process of dispatching Remote Workloads to Workers, obfuscating the details of the most critical part of MultiKueue wWrkload's execution.
-This forces users to search across all Worker Clusters to be able to see the big picture.
-
-Moreover, it does not natively support a contract defining a human-readable execution status.
-It instead relies on a list of conditions and supporting information provided inside the WorkloadStatus field for users to piece together the actual global state of the underlying job's execution on their own.
-
-To address this, we need a way to present users with a clearly defined, human-readable summary of the global state, which aggregates information from all clusters in the MultiKueue environment.
-
-If nothing is implemented, users will remain forced to rely on:
+Currently, the Workload status subresource is missing key information aggregating data from its remote counterparts on Worker Clusters. The users are forced to rely on:
 * the conditions of the Manager Workload, which are misaligned and non-representative of the extensive logic in MultiKueue,
 * manually querying and aggregating the conditions of Remote Workloads across all registered workers; this covers a lot of distributed data, and users lack core information about which workers are eligible for dispatch by virtue of being put forward by the dispatch strategy.
+
+To address this, we need a way to present users with a clearly defined, human-readable summary of the global state, which aggregates information from all clusters in the MultiKueue environment.
 
 ### Goals
 
