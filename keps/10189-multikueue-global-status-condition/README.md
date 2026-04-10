@@ -23,6 +23,10 @@
   - [Global Status Summary](#global-status-summary)
   - [Visibility API](#visibility-api)
   - [Consolidated Workload State](#consolidated-workload-state)
+  - [Granular Conditions](#granular-conditions)
+    - [AdmittedInWorker Condition](#admittedinworker-condition)
+    - [Condition per status](#condition-per-status)
+    - [Disadvantages](#disadvantages)
 <!-- /toc -->
 
 ## Summary
