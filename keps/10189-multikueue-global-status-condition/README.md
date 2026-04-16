@@ -293,7 +293,7 @@ The main caveat here is that this approach risks being confusing to users, as th
 
 ### Granular Conditions
 
-Instead of defining a single Condition, we could provide one or more Granular Conditions, each servicing the purpose of supplying data missing from the WorkloadStatus, allowing to piece the Global Status of a MultiKueue workload by the user on their own.
+Instead of defining a single Condition, we could provide one or more Granular Conditions, each serving the purpose of supplying data missing from the WorkloadStatus, allowing to piece the Global Status of a MultiKueue workload by the user on their own.
 
 #### AdmittedInWorker Condition
 
