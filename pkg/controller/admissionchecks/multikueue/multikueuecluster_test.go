@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -663,13 +664,14 @@ func TestUpdateConfig(t *testing.T) {
 			c := builder.Build()
 
 			adapters, _ := jobframework.GetMultiKueueAdapters(sets.New("batch/job"))
-			reconciler := newClustersReconciler(c, TestNamespace, 0, defaultOrigin, nil, adapters, tc.cpCreds, nil)
+			var remoteClients *RemoteClients = NewRemoteClients()
+			if len(tc.remoteClients) > 0 {
+				remoteClients.clients = tc.remoteClients
+			}
+			reconciler := newClustersReconciler(c, NewRemoteClients(), TestNamespace, 0, defaultOrigin, nil, adapters, tc.cpCreds, nil)
 
 			reconciler.rootContext = ctx
 
-			if len(tc.remoteClients) > 0 {
-				reconciler.remoteClients = tc.remoteClients
-			}
 			reconciler.builderOverride = fakeClientBuilder(ctx)
 
 			if tc.skipInsecureKubeconfig {
@@ -720,7 +722,12 @@ func TestUpdateConfig(t *testing.T) {
 				t.Errorf("unexpected clusters (-want/+got):\n%s", diff)
 			}
 
-			if diff := cmp.Diff(tc.wantRemoteClients, reconciler.remoteClients, cmpopts.EquateEmpty(),
+			wantRemoteClients := NewRemoteClients()
+			wantRemoteClients.clients = tc.wantRemoteClients
+			if diff := cmp.Diff(wantRemoteClients, reconciler.remoteClients, cmpopts.EquateEmpty(),
+				cmp.Comparer(func(a, b *RemoteClients) bool {
+					return maps.Equal(a.clients, b.clients)
+				}),
 				cmp.Comparer(func(a, b *remoteClient) bool {
 					if a.failedConnAttempts != b.failedConnAttempts {
 						return false

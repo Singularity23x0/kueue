@@ -38,6 +38,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/rest"
@@ -59,6 +60,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	visibilityv1beta2 "sigs.k8s.io/kueue/client-go/clientset/versioned/typed/visibility/v1beta2"
 	"sigs.k8s.io/kueue/pkg/controller/jobframework"
 	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/util/roletracker"
@@ -88,10 +90,16 @@ type clientConfig struct {
 	RestConfig *rest.Config
 }
 
+type RemoteClients struct {
+	sync.RWMutex
+	clients map[string]*remoteClient
+}
+
 type remoteClient struct {
 	clusterName  string
 	localClient  client.Client
 	client       client.WithWatch
+	visibility   *visibilityv1beta2.VisibilityV1beta2Client
 	wlUpdateCh   chan<- event.GenericEvent
 	watchEndedCh chan<- event.GenericEvent
 	watchCancel  func()
@@ -106,6 +114,61 @@ type remoteClient struct {
 	// and creating valid kubeconfig content is not trivial.
 	// The full client creation and usage is validated in the integration and e2e tests.
 	builderOverride clientWithWatchBuilder
+}
+
+func NewRemoteClients() *RemoteClients {
+	return &RemoteClients{
+		clients: make(map[string]*remoteClient),
+	}
+}
+
+func (rcs *RemoteClients) GetClient(clusterName string) (client.Client, bool) {
+	rcs.RLock()
+	defer rcs.RUnlock()
+	rc, found := rcs.clients[clusterName]
+	if !found {
+		return nil, false
+	}
+	return rc.client, true
+}
+
+func (rcs *RemoteClients) GetVisibilityClient(clusterName string) (*visibilityv1beta2.VisibilityV1beta2Client, bool) {
+	rcs.RLock()
+	defer rcs.RUnlock()
+	rc, found := rcs.clients[clusterName]
+	if !found {
+		return nil, false
+	}
+	return rc.visibility, true
+}
+
+func (rcs *RemoteClients) ListClusters() sets.Set[string] {
+	return sets.KeySet(rcs.clients)
+}
+
+func (rcs *RemoteClients) get(clusterName string) (rc *remoteClient, found bool) {
+	rcs.RLock()
+	defer rcs.RUnlock()
+	rc, found = rcs.clients[clusterName]
+	return rc, found
+}
+
+func (rcs *RemoteClients) set(clusterName string, rc *remoteClient) {
+	rcs.Lock()
+	defer rcs.Unlock()
+	rcs.clients[clusterName] = rc
+}
+
+func (rcs *RemoteClients) delete(clusterName string) {
+	rcs.Lock()
+	defer rcs.Unlock()
+	delete(rcs.clients, clusterName)
+}
+
+func (rcs *RemoteClients) listAll() []*remoteClient {
+	rcs.RLock()
+	defer rcs.RUnlock()
+	return slices.Collect(maps.Values(rcs.clients))
 }
 
 func newRemoteClient(localClient client.Client, wlUpdateCh, watchEndedCh chan<- event.GenericEvent, origin, clusterName string, adapters map[string]jobframework.MultiKueueAdapter) *remoteClient {
@@ -130,6 +193,27 @@ func newClientWithWatch(config *clientConfig, options client.Options) (client.Wi
 		return nil, err
 	}
 	return client.NewWithWatch(restConfig, options)
+}
+
+func newVisibilityClient(config *clientConfig) (visClient *visibilityv1beta2.VisibilityV1beta2Client, err error) {
+	if !features.Enabled(features.MultiKueueGlobalOrderSummary) {
+		return nil, nil
+	}
+
+	restConfig := config.RestConfig
+	if restConfig == nil {
+		restConfig, err = clientcmd.RESTConfigFromKubeConfig(config.Kubeconfig)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	visClient, err = visibilityv1beta2.NewForConfig(restConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	return visClient, nil
 }
 
 type workloadKueueWatcher struct{}
@@ -173,6 +257,13 @@ func (rc *remoteClient) setConfig(watchCtx context.Context, config *clientConfig
 	}
 
 	rc.client = remoteClient
+
+	visibilityClient, err := newVisibilityClient(config)
+	if err != nil {
+		return nil, err
+	}
+
+	rc.visibility = visibilityClient
 
 	watchCtx, rc.watchCancel = context.WithCancel(watchCtx)
 	err = rc.startWatcher(watchCtx, kueue.GroupVersion.WithKind("Workload").GroupKind().String(), &workloadKueueWatcher{})
@@ -338,7 +429,7 @@ type clustersReconciler struct {
 
 	lock sync.RWMutex
 	// The list of remote remoteClients, indexed by the cluster name.
-	remoteClients map[string]*remoteClient
+	remoteClients *RemoteClients
 	wlUpdateCh    chan event.GenericEvent
 
 	// gcInterval - time waiting between two GC runs.
@@ -395,9 +486,9 @@ func (c *clustersReconciler) Start(ctx context.Context) error {
 func (c *clustersReconciler) stopAndRemoveCluster(clusterName string) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	if rc, found := c.remoteClients[clusterName]; found {
+	if rc, found := c.remoteClients.get(clusterName); found {
 		rc.StopWatchers()
-		delete(c.remoteClients, clusterName)
+		c.remoteClients.delete(clusterName)
 	}
 }
 
@@ -405,13 +496,13 @@ func (c *clustersReconciler) setRemoteClientConfig(ctx context.Context, clusterN
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	client, found := c.remoteClients[clusterName]
+	client, found := c.remoteClients.get(clusterName)
 	if !found {
 		client = newRemoteClient(c.localClient, c.wlUpdateCh, c.watchEndedCh, origin, clusterName, c.adapters)
 		if c.builderOverride != nil {
 			client.builderOverride = c.builderOverride
 		}
-		c.remoteClients[clusterName] = client
+		c.remoteClients.set(clusterName, client)
 	}
 
 	clientLog := ctrl.LoggerFrom(c.rootContext).WithValues("clusterName", clusterName)
@@ -428,7 +519,7 @@ func (c *clustersReconciler) controllerFor(acName string) (*remoteClient, bool) 
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 
-	rc, f := c.remoteClients[acName]
+	rc, f := c.remoteClients.get(acName)
 	return rc, f
 }
 
@@ -686,7 +777,7 @@ func (c *clustersReconciler) runGC(ctx context.Context) {
 func (c *clustersReconciler) getRemoteClients() []*remoteClient {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
-	return slices.Collect(maps.Values(c.remoteClients))
+	return c.remoteClients.listAll()
 }
 
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;watch;update
@@ -695,6 +786,7 @@ func (c *clustersReconciler) getRemoteClients() []*remoteClient {
 
 func newClustersReconciler(
 	c client.Client,
+	rcs *RemoteClients,
 	namespace string,
 	gcInterval time.Duration,
 	origin string,
@@ -706,7 +798,7 @@ func newClustersReconciler(
 	return &clustersReconciler{
 		localClient:         c,
 		configNamespace:     namespace,
-		remoteClients:       make(map[string]*remoteClient),
+		remoteClients:       rcs,
 		wlUpdateCh:          make(chan event.GenericEvent, eventChBufferSize),
 		gcInterval:          gcInterval,
 		origin:              origin,

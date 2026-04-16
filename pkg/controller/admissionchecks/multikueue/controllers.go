@@ -108,7 +108,7 @@ func WithRoleTracker(tracker *roletracker.RoleTracker) SetupOption {
 	}
 }
 
-func SetupControllers(mgr ctrl.Manager, namespace string, opts ...SetupOption) error {
+func SetupControllers(mgr ctrl.Manager, rcs *RemoteClients, namespace string, opts ...SetupOption) error {
 	options := &SetupOptions{
 		gcInterval:        defaultGCInterval,
 		origin:            defaultOrigin,
@@ -148,7 +148,7 @@ func SetupControllers(mgr ctrl.Manager, namespace string, opts ...SetupOption) e
 		cpCreds = &NoOpClusterProfileCreds{}
 	}
 
-	cRec := newClustersReconciler(mgr.GetClient(), namespace, options.gcInterval, options.origin, fsWatcher, options.adapters, cpCreds, options.roleTracker)
+	cRec := newClustersReconciler(mgr.GetClient(), rcs,namespace, options.gcInterval, options.origin, fsWatcher, options.adapters, cpCreds, options.roleTracker)
 	err = cRec.setupWithManager(mgr)
 	if err != nil {
 		return err

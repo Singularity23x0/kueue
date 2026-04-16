@@ -129,8 +129,9 @@ var _ = ginkgo.Describe("MultiKueue", ginkgo.Label("area:multikueue", "feature:m
 					gvk := adapter.GVK()
 					adapters[gvk.String()] = adapter
 				}
+				rcs := multikueue.NewRemoteClients()
 
-				err = multikueue.SetupControllers(mgr, managersConfigNamespace.Name,
+				err = multikueue.SetupControllers(mgr, rcs, managersConfigNamespace.Name,
 					multikueue.WithGCInterval(2*time.Second),
 					multikueue.WithWorkerLostTimeout(testingWorkerLostTimeout),
 					multikueue.WithEventsBatchPeriod(100*time.Millisecond),

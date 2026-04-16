@@ -367,6 +367,8 @@ const (
 	// stale workload accumulation (e.g., after PodsReady timeout eviction
 	// deletes a Deployment-owned pod).
 	FinishOrphanedWorkloads featuregate.Feature = "FinishOrphanedWorkloads"
+
+	MultiKueueGlobalOrderSummary featuregate.Feature = "MultiKueueGlobalOrderSummary"
 )
 
 func init() {
@@ -564,6 +566,10 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 
 	FinishOrphanedWorkloads: {
 		{Version: version.MustParse("0.18"), Default: true, PreRelease: featuregate.Beta},
+	},
+
+	MultiKueueGlobalOrderSummary: {
+		{Version: version.MustParse("0.18"), Default: false, PreRelease: featuregate.Alpha},
 	},
 }
 

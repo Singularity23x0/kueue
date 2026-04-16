@@ -474,7 +474,8 @@ func setupControllers(ctx context.Context, mgr ctrl.Manager, cCache *schdcache.C
 			}
 		}
 
-		if err := multikueue.SetupControllers(mgr, *cfg.Namespace,
+		remoteClients := multikueue.NewRemoteClients()
+		if err := multikueue.SetupControllers(mgr, remoteClients, *cfg.Namespace,
 			multikueue.WithGCInterval(cfg.MultiKueue.GCInterval.Duration),
 			multikueue.WithOrigin(ptr.Deref(cfg.MultiKueue.Origin, configapi.DefaultMultiKueueOrigin)),
 			multikueue.WithWorkerLostTimeout(cfg.MultiKueue.WorkerLostTimeout.Duration),

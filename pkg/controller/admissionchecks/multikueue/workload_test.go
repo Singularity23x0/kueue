@@ -1953,7 +1953,7 @@ func TestWlReconcile(t *testing.T) {
 
 				managerClient := managerBuilder.Build()
 				adapters, _ := jobframework.GetMultiKueueAdapters(sets.New("batch/job"))
-				cRec := newClustersReconciler(managerClient, TestNamespace, 0, defaultOrigin, nil, adapters, nil, nil)
+				cRec := newClustersReconciler(managerClient, NewRemoteClients(), TestNamespace, 0, defaultOrigin, nil, adapters, nil, nil)
 
 				worker1Client := getClientBuilder(ctx).
 					WithLists(&kueue.WorkloadList{Items: tc.worker1Workloads}, &batchv1.JobList{Items: tc.worker1Jobs}).
@@ -1964,7 +1964,7 @@ func TestWlReconcile(t *testing.T) {
 				w1remoteClient := newRemoteClient(managerClient, nil, nil, defaultOrigin, "", adapters)
 				w1remoteClient.client = worker1Client
 				w1remoteClient.connecting.Store(false)
-				cRec.remoteClients["worker1"] = w1remoteClient
+				cRec.remoteClients.set("worker1", w1remoteClient)
 
 				var worker2Client client.WithWatch
 				if tc.useSecondWorker {
@@ -1998,7 +1998,7 @@ func TestWlReconcile(t *testing.T) {
 					if !tc.worker2Reconnecting {
 						w2remoteClient.connecting.Store(false)
 					}
-					cRec.remoteClients["worker2"] = w2remoteClient
+					cRec.remoteClients.set("worker2", w2remoteClient)
 				}
 
 				helper, _ := admissioncheck.NewMultiKueueStoreHelper(managerClient)

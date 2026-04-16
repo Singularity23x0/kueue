@@ -178,8 +178,9 @@ func managerAndMultiKueueSetup(
 
 	adapters, err := jobframework.GetMultiKueueAdapters(enabledIntegrations)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	rcs := multikueue.NewRemoteClients()
 
-	err = multikueue.SetupControllers(mgr, managersConfigNamespace.Name,
+	err = multikueue.SetupControllers(mgr, rcs, managersConfigNamespace.Name,
 		multikueue.WithGCInterval(gcInterval),
 		multikueue.WithWorkerLostTimeout(testingWorkerLostTimeout),
 		multikueue.WithEventsBatchPeriod(100*time.Millisecond),
