@@ -220,7 +220,7 @@ Integration tests for assigning the expected condition correctly for each Global
 
 #### e2e tests
 
-Integration tests for assigning the expected condition correctly for each Global Status will be added in a new file as part of the [MultiKueue E2E Test Suite](https://github.com/Singularity23x0/kueue/blob/66c2cf1a93ee3f19d8b29309d27832a4595d4106/test/e2e/multikueue/suite_test.go#L62).
+E2E Tests for assigning the expected condition correctly for each Global Status will be added in a new file as part of the [MultiKueue E2E Test Suite](https://github.com/Singularity23x0/kueue/blob/66c2cf1a93ee3f19d8b29309d27832a4595d4106/test/e2e/multikueue/suite_test.go#L62).
 
 ### Graduation Criteria
 
