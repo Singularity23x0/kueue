@@ -101,14 +101,19 @@ The condition will be gated behind the **MultiKueueGlobalStatusCondition** featu
 
 #### Story 1
 
-I want to get an idea of when my job will be admitted. Has it already received quota on the manager?
+_I want to get an idea of when my job will be admitted. Has it already received quota on the manager?
 Is it being dispatched? If yes - what are the workers it has been dispatched to, so that I can check the status of some or all of them for how my job is doing there?
-Or maybe it is already running on a specific worker? If yes - which one?
+Or maybe it is already running on a specific worker? If yes - which one?_
+
+Currently to do this I need to query multiple clusters and sift through a set of Conditions on each of them to get an idea on what is the actual status of my job’s execution.
+The existing Conditions and AdmissionChecks provide little information at the most complex and expansive stage of the Manager Workload’s lifecycle, when MK dispatches workloads to Workers waiting for one to Admit the Remote.
 
 #### Story 2
 
-My job hasn’t been admitted for a long time. I would like to verify why that is.
-Are remotes being created? Have they been dispatched to all workers? What is their status there? Are they waiting for quota? Are they waiting for admission checks?
+_My job hasn’t been admitted for a long time. I would like to verify why that is.
+Are remotes being created? Have they been dispatched to all workers? What is their status there? Are they waiting for quota? Are they waiting for admission checks?_
+
+As in [Story 1](#story-1), I have to query multiple workers to verify which one is troublesome, sifting through their WorkloadStatus and Conditions within.
 
 ### Notes/Constraints/Caveats
 
