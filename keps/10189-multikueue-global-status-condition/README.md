@@ -323,4 +323,4 @@ These conditions could be one or more of:
 
 #### Disadvantages
 
-The main issue here, is that while we ensure the status covers all MultiKueue cases, reading the state of the job's execution remains complex. We still have to read an understand a multitude of conditions and status information to piece together the inner workings of MultiKueue, isntead of being provided with a clear, human-readable summary. This is especially apparrent when considering the latter variant, where the number of added conditions expands to 3 or 4.
+The main issue here is that, while we ensure the status covers all MultiKueue cases, reading the state of the job's execution remains complex. We still have to read and understand a multitude of conditions and status information to piece together the inner workings of MultiKueue, isntead of being provided with a clear, human-readable summary. This is especially apparent when considering the latter variant, where the number of added conditions expands to 3 or 4.
