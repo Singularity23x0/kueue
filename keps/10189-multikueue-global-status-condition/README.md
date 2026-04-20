@@ -297,6 +297,8 @@ Instead of defining a single Condition, we could provide one or more Granular Co
 
 #### AdmittedInWorker Condition
 
+The table below lists how the AdmittedInWorker condition would differ from the core proposal.
+Nil denotes a condition not having an equivalent. If not otherwise stated, the **Reason** and **Message** are the same as in the core proposal.
 |Corresponding MultiKueueGlobalStatus|AdmittedInWorker Condition Value|
 |---|---|
 |SUCCESS|nil|
@@ -309,7 +311,7 @@ Instead of defining a single Condition, we could provide one or more Granular Co
 |WAITING_FOR_MANAGER_QUOTA|**State**: False|
 
 This alternative reduces data duplication from listing the SUCCESS and FAILED states.
-Outside of that, it closely resembles the proposed solution, especially given that both Reason and Message values can be copied directly in all cases but the INACTIVE state one.
+Outside of that, it closely resembles the proposed solution, especially given that both Reason and Message values can be copied directly in all cases (except the Reson being different for the INACTIVE status).
 
 #### Condition per status
 
