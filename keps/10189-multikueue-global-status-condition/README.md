@@ -209,14 +209,14 @@ const (
 
   // MultiKueueWorkload means the workload is a MultiKueue Workload created on a Manager Cluster.
   // The possible reasons depend on the state of the MK Workload:
-  // - SUCCESS,
-  // - FAILED,
-  // - INACTIVE,
-  // - RUNNING,
-  // - WORKER_SELECTED,
-  // - WAITING_FOR_WORKER,
-  // - WAITING_FOR_WORKER_NOMINATION,
-  // - WAITING_FOR_MANAGER_QUOTA.
+  // - Success,
+  // - Failed,
+  // - Inactive,
+  // - Running,
+  // - WorkerSelected,
+  // - WaitingForWorker,
+  // - WaitingForWorkerNomination,
+  // - WaitingForManagerQuota.
   MultiKueueWorkload = "MultiKueueWorkload"
 
   // ...
@@ -228,35 +228,34 @@ The MultiKueueGlobalStatus enumeration will be defined in the MultiKueue types f
 ```go
 const (
   // Success state means the workload has finished successfully.
-  Success = "SUCCESS"
+  Success = "Success"
 
   // Failed state means the workload has finished with the Failed state.
-  Failed = "FAILED"
+  Failed = "Failed"
 
   // Inactive state means the workload is inactive.
-  Inactive = "INACTIVE"
+  Inactive = "Inactive"
 
   // Running state means the workload has the "Admitted" condition on the Manager Cluster and was admitted on a specific Worker Cluster.
   // The underlying job is being executed on said Worker Cluster.
-  Running = "RUNNING"
+  Running = "Running"
 
   // WorkerSelected state means the workload has the "Admitted" condition on the Manager Cluster but was not admitted on the Worker yet.
   // A specific Worker was selected, but the workload has only managed to reserve quota there so far.
-  WorkerSelected = "WORKER_SELECTED"
+  WorkerSelected = "WorkerSelected"
 
   // WaitingForWorker state means the workload has received quota on the Manager Cluster.
   // MultiKueue is currently dispatching remote workloads to eligible Workers.
-  WaitingForWorker = "WAITING_FOR_WORKER"
+  WaitingForWorker = "WaitingForWorker"
 
   // WaitingForWorkerNomination state is specific to a non-primary component workload in the multi-workload-resource handling scenario.
   // It means the component workload has received quota reservation on the Manager
   // and is waiting for the primary component workload to select a worker to dispatch a remote to.
-  WaitingForWorkerNomination = "WAITING_FOR_WORKER_NOMINATION"
+  WaitingForWorkerNomination = "WaitingForWorkerNomination"
 
   // WaitingForManagerQuota state means the workload is currently in the "Pending" state on the Manager Cluster (does not currently hold any quota reservations).
-  WaitingForManagerQuota = "WAITING_FOR_MANAGER_QUOTA"
+  WaitingForManagerQuota = "WaitingForManagerQuota"
 )
-
 ```
 
 This set of states will directly translate to the reasons provided in the body of the Condtion, with the adjustment of using CammelCase instead of SNAKE_CASE (e.g. WORKER_SELECTED status will translate to WorkerSelected reason).
