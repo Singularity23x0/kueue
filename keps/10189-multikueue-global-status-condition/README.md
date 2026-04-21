@@ -73,6 +73,72 @@ this is possible if the MultiKueueWaitForWorkloadAdmitted feature is disabled,
 * **WAITING_FOR_WORKER_NOMINATION** - specific to a non-primary component workload in the multi-workload-resource handling scenario;  quota reserved on the component workload; the component workload is waiting for the primary to select a worker to create a remote on,
 * **WAITING_FOR_MANAGER_QUOTA** - local workload is waiting to be granted a quota reservation on the Manager Cluster.
 
+```mermaid
+flowchart TD
+  START@{ shape: circle, label: "START" } --> WAITING_FOR_MANAGER_QUOTA
+
+  subgraph CoreLogic [Core MultiKueue Processing Path]
+    WAITING_FOR_MANAGER_QUOTA --> ManagerQuotaReserved@{shape: rounded, label: "Quota Reserved on Manager"} --> component{"Is a non-primary Component Workload?"}
+    component -- YES --> WAITING_FOR_WORKER_NOMINATION
+    component -- NO --> WAITING_FOR_WORKER
+
+    WAITING_FOR_WORKER_NOMINATION --> WorkerNominated@{shape: rounded, label: "Worker nominated"} --> WAITING_FOR_WORKER
+
+    WAITING_FOR_WORKER --> AnyWorkerQuotaReserved@{ shape: rounded, label: "Quota Reserved on any Worker"} --> featureGate{"Feature Gate: Wait for Workload Admitted"}
+    featureGate -- ENABLED --> WAITING_FOR_WORKER
+    featureGate -- DISABLED --> WORKER_SELECTED
+
+    WORKER_SELECTED --> WorkerAdmitted@{ shape: rounded, label: "Admitted on Worker"} --> RUNNING
+    WAITING_FOR_WORKER --> AnyWorkerAdmitted@{ shape: rounded, label: "Workload admitted on any Worker"} --> RUNNING
+
+    subgraph SearchingForWorker [Searching for Worker]
+      ManagerQuotaReserved
+      component
+      WAITING_FOR_WORKER_NOMINATION
+      WorkerNominated
+      WAITING_FOR_WORKER
+      AnyWorkerQuotaReserved
+      featureGate
+      AnyWorkerAdmitted
+    end
+
+    subgraph WorkertSelected [Worker Selected]
+      WORKER_SELECTED
+      WorkerAdmitted
+      RUNNING
+    end
+  end
+
+  subgraph Finalize [Finalizing]
+    RUNNING --> Finished@{ shape: rounded, label: "Finished"} --> result{"Result?"}
+    result -- Succeeded --> SUCCESS
+    result -- Failed --> FAILED
+  end
+
+  subgraph Active [INACTIVE state management]
+    direction BT
+    Deactivated@{ shape: rounded, label: "Deactivated"} --> INACTIVE --> Reactivated@{ shape: rounded, label: "Reactivated"}
+  end
+
+  Reactivated --> WAITING_FOR_MANAGER_QUOTA
+  CoreLogic --> Deactivated
+
+  subgraph Evictions [Evictions handling]
+    direction BT
+    EvictedOnManager@{ shape: rounded, label: "Evicted on Manager"}
+    EvictedOnWorker@{ shape: rounded, label: "Evicted on Selected Worker or Worker Connection lost"}
+    EvictedOnWorker --> EvictedOnManager
+  end
+
+  EvictedOnManager --> WAITING_FOR_MANAGER_QUOTA
+  CoreLogic --> EvictedOnManager
+  WorkertSelected --> EvictedOnWorker
+
+  END@{ shape: dbl-circ, label: "END" }
+  SUCCESS --> END
+  FAILED --> END
+```
+
 For each MultiKueueGlobalStatus a message - **MultiKueueGlobalStatusMessage** - will be defined:
 * SUCCESS: `Workload has finished successfully on Worker Cluster: <worker cluster reference>.`
 * FAILED: `Workload failed after admission on Worker Cluster: <worker cluster reference>.`
