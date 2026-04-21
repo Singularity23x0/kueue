@@ -135,7 +135,7 @@ Countering that will require thorough test coverage, with a special emphasis on 
 
 ## Design Details
 
-The new condition type will be defined alongside existing ones in the [workload types file](https://github.com/kubernetes-sigs/kueue/blob/9e20f44bb05758976744a5ee6aa77309677bb22f/apis/kueue/v1beta1/workload_types.go#L628).
+The new condition type will be defined alongside existing ones in the workload types file.
 
 ```go
 const (
@@ -157,7 +157,7 @@ const (
 )
 ```
 
-The MultiKueueGlobalStatus enumeration will be defined in the [MultiKueue types file](https://github.com/kubernetes-sigs/kueue/blob/9e20f44bb05758976744a5ee6aa77309677bb22f/apis/kueue/v1beta1/multikueue_types.go#L17).
+The MultiKueueGlobalStatus enumeration will be defined in the MultiKueue types file.
 
 ```go
 const (
@@ -193,8 +193,8 @@ const (
 
 ```
 
-The condition will be populated inside the [Reconciler of the MultiKueue Core Controller](https://github.com/kubernetes-sigs/kueue/blob/9e20f44bb05758976744a5ee6aa77309677bb22f/pkg/controller/admissionchecks/multikueue/workload.go#L158).
-This reconciler already gathers all the necessary data in the form of the [Workload Group](https://github.com/kubernetes-sigs/kueue/blob/9e20f44bb05758976744a5ee6aa77309677bb22f/pkg/controller/admissionchecks/multikueue/workload.go#L83) internal structure.
+The condition will be populated inside the Reconciler of the MultiKueue Core Controller.
+This reconciler already gathers all the necessary data in the form of the Workload Group internal structure.
 
 The logic identifying the MultiKueueGlobalStatus,
 calculating necessary aggregations and generating the appropriate MultiKueueGlobalStatusMessage will be implemented in the
@@ -217,15 +217,15 @@ to implement this enhancement.
 
 #### Unit tests
 
-Unit tests will be added for the methods identifying the MultiKueueGlobalStatus and calculating the condition as part of the [MultiKueue Workload Controller](https://github.com/kubernetes-sigs/kueue/blob/9e20f44bb05758976744a5ee6aa77309677bb22f/pkg/controller/admissionchecks/multikueue/workload_test.go#L17) test suite.
+Unit tests will be added for the methods identifying the MultiKueueGlobalStatus and calculating the condition as part of the MultiKueue Workload Controller test suite.
 
 #### Integration tests
 
-Integration tests for assigning the expected condition correctly for each Global Status will be added in a new file as part of the [MultiKueue Integration Test Suite](https://github.com/kubernetes-sigs/kueue/blob/9e20f44bb05758976744a5ee6aa77309677bb22f/test/integration/multikueue/suite_test.go#L93).
+Integration tests for assigning the expected condition correctly for each Global Status will be added in a new file as part of the MultiKueue Integration Test Suite.
 
 #### e2e tests
 
-E2E Tests for assigning the expected condition correctly for each Global Status will be added in a new file as part of the [MultiKueue E2E Test Suite](https://github.com/kubernetes-sigs/kueue/blob/9e20f44bb05758976744a5ee6aa77309677bb22f/test/e2e/multikueue/suite_test.go#L62).
+E2E Tests for assigning the expected condition correctly for each Global Status will be added in a new file as part of the MultiKueue E2E Test Suite.
 
 ### Graduation Criteria
 
