@@ -259,6 +259,8 @@ const (
 
 ```
 
+This set of states will directly translate to the reasons provided in the body of the Condtion, with the adjustment of using CammelCase instead of SNAKE_CASE (e.g. WORKER_SELECTED status will translate to WorkerSelected reason).
+
 The condition will be populated inside the Reconciler of the MultiKueue Core Controller.
 This reconciler already gathers all the necessary data in the form of the Workload Group internal structure.
 
