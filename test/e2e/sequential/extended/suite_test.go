@@ -14,56 +14,58 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package certmanager
+package extended
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
-	prometheusv1 "github.com/prometheus/client_golang/api/prometheus/v1"
-	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	visibility "sigs.k8s.io/kueue/client-go/clientset/versioned/typed/visibility/v1beta2"
+	config "sigs.k8s.io/kueue/apis/config/v1beta2"
 	"sigs.k8s.io/kueue/test/util"
 )
 
 var (
-	k8sClient        client.WithWatch
-	ctx              context.Context
-	cfg              *rest.Config
-	restClient       *rest.RESTClient
-	prometheusClient prometheusv1.API
-	kueueNS          = util.GetKueueNamespace()
-	visibilityClient visibility.VisibilityV1beta2Interface
+	k8sClient       client.WithWatch
+	ctx             context.Context
+	defaultKueueCfg *config.Configuration
+	kindClusterName = os.Getenv("KIND_CLUSTER_NAME")
 )
 
 func TestAPIs(t *testing.T) {
-	util.RunE2ESuite(t, "End To End Cert Manager Integration Suite")
+	util.RunE2ESuite(t, "End To End Sequential Extended Suite")
 }
 
 var _ = ginkgo.BeforeSuite(func() {
 	util.SetupLogger()
 
 	var err error
-	k8sClient, cfg, err = util.CreateClientUsingCluster("")
+	k8sClient, _, err = util.CreateClientUsingCluster("")
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	restClient = util.CreateRestClient(cfg)
-	visibilityClient = util.CreateVisibilityClient("")
 	ctx = ginkgo.GinkgoT().Context()
 
 	waitForAvailableStart := time.Now()
 	util.WaitForKueueAvailability(ctx, k8sClient)
-	labelFilter := ginkgo.GinkgoLabelFilter()
-	if ginkgo.Label("feature:prometheus").MatchesLabelFilter(labelFilter) {
-		prometheusClient = util.CreatePrometheusClient(cfg)
-		util.WaitForPrometheusAvailability(ctx, k8sClient)
+	if ginkgo.Label("feature:managejobswithoutqueuename").MatchesLabelFilter(ginkgo.GinkgoLabelFilter()) {
+		util.WaitForJobSetAvailability(ctx, k8sClient)
+		util.WaitForAppWrapperAvailability(ctx, k8sClient)
+		util.WaitForLeaderWorkerSetAvailability(ctx, k8sClient)
+	}
+	if ginkgo.Label("feature:spark").MatchesLabelFilter(ginkgo.GinkgoLabelFilter()) {
+		util.WaitForSparkOperatorAvailability(ctx, k8sClient)
 	}
 	ginkgo.GinkgoLogr.Info(
 		"Kueue and all required operators are available in the cluster",
 		"waitingTime", time.Since(waitForAvailableStart),
 	)
+	defaultKueueCfg = util.GetKueueConfiguration(ctx, k8sClient)
+})
+
+var _ = ginkgo.AfterSuite(func() {
+	util.UpdateKueueConfigurationAndRestart(ctx, k8sClient, defaultKueueCfg, kindClusterName)
 })

@@ -800,7 +800,7 @@ func TestReconcile(t *testing.T) {
 						Type:    kueue.WorkloadDeactivationTarget,
 						Status:  metav1.ConditionTrue,
 						Reason:  "AdmissionCheck",
-						Message: "Admission check(s): check, were rejected",
+						Message: `AdmissionCheck in Rejected state: "check"`,
 					},
 				).
 				Obj(),
@@ -809,7 +809,7 @@ func TestReconcile(t *testing.T) {
 					Key:       types.NamespacedName{Namespace: "ns", Name: "wl"},
 					EventType: "Warning",
 					Reason:    "AdmissionCheckRejected",
-					Message:   "Deactivating workload because AdmissionCheck for check was Rejected: ",
+					Message:   `Deactivated due to AdmissionCheck in Rejected state: "check"`,
 				},
 			},
 		},
@@ -848,7 +848,7 @@ func TestReconcile(t *testing.T) {
 						Type:    kueue.WorkloadDeactivationTarget,
 						Status:  metav1.ConditionTrue,
 						Reason:  "AdmissionCheck",
-						Message: "Admission check(s): check, were rejected",
+						Message: `AdmissionCheck in Rejected state: "check"`,
 					},
 				).
 				Obj(),
@@ -857,7 +857,57 @@ func TestReconcile(t *testing.T) {
 					Key:       types.NamespacedName{Namespace: "ns", Name: "wl"},
 					EventType: "Warning",
 					Reason:    "AdmissionCheckRejected",
-					Message:   "Deactivating workload because AdmissionCheck for check was Rejected: ",
+					Message:   `Deactivated due to AdmissionCheck in Rejected state: "check"`,
+				},
+			},
+		},
+		"admitted workload with rejected checks gets deactivated, with message": {
+			workload: utiltestingapi.MakeWorkload("wl", "ns").
+				ReserveQuotaAt(utiltestingapi.MakeAdmission("q1").Obj(), now).
+				AdmittedAt(true, now).
+				ControllerReference(batchv1.SchemeGroupVersion.WithKind("Job"), "ownername", "owneruid").
+				AdmissionCheck(kueue.AdmissionCheckState{
+					Name:    "check",
+					State:   kueue.CheckStateRejected,
+					Message: "quota exceeded",
+				}).
+				Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
+				ReserveQuotaAt(utiltestingapi.MakeAdmission("q1").Obj(), now).
+				AdmittedAt(true, now).
+				ControllerReference(batchv1.SchemeGroupVersion.WithKind("Job"), "ownername", "owneruid").
+				AdmissionCheck(kueue.AdmissionCheckState{
+					Name:    "check",
+					State:   kueue.CheckStateRejected,
+					Message: "quota exceeded",
+				}).
+				Conditions(
+					metav1.Condition{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionTrue,
+						Reason:  "AdmittedByTest",
+						Message: "Admitted by ClusterQueue q1",
+					},
+					metav1.Condition{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionTrue,
+						Reason:  "ByTest",
+						Message: "Admitted by ClusterQueue q1",
+					},
+					metav1.Condition{
+						Type:    kueue.WorkloadDeactivationTarget,
+						Status:  metav1.ConditionTrue,
+						Reason:  "AdmissionCheck",
+						Message: `AdmissionCheck in Rejected state: "check" (quota exceeded)`,
+					},
+				).
+				Obj(),
+			wantEvents: []utiltesting.EventRecord{
+				{
+					Key:       types.NamespacedName{Namespace: "ns", Name: "wl"},
+					EventType: "Warning",
+					Reason:    "AdmissionCheckRejected",
+					Message:   `Deactivated due to AdmissionCheck in Rejected state: "check" (quota exceeded)`,
 				},
 			},
 		},
@@ -881,7 +931,7 @@ func TestReconcile(t *testing.T) {
 					Type:    kueue.WorkloadDeactivationTarget,
 					Status:  metav1.ConditionTrue,
 					Reason:  kueue.WorkloadEvictedByAdmissionCheck,
-					Message: "Admission check(s): check-1, were rejected",
+					Message: `AdmissionCheck in Rejected state: "check-1"`,
 				}).
 				Obj(),
 			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
@@ -907,14 +957,14 @@ func TestReconcile(t *testing.T) {
 						Type:    kueue.WorkloadEvicted,
 						Status:  metav1.ConditionTrue,
 						Reason:  "DeactivatedDueToAdmissionCheck",
-						Message: "The workload is deactivated due to Admission check(s): check-1, were rejected",
+						Message: `The workload is deactivated due to AdmissionCheck in Rejected state: "check-1"`,
 					},
 					// In a real cluster this condition would be removed but it cant be in the fake cluster
 					metav1.Condition{
 						Type:    kueue.WorkloadDeactivationTarget,
 						Status:  metav1.ConditionTrue,
 						Reason:  kueue.WorkloadEvictedByAdmissionCheck,
-						Message: "Admission check(s): check-1, were rejected",
+						Message: `AdmissionCheck in Rejected state: "check-1"`,
 					},
 				).
 				SchedulingStatsEviction(
@@ -948,7 +998,7 @@ func TestReconcile(t *testing.T) {
 						Type:    kueue.WorkloadEvicted,
 						Status:  metav1.ConditionTrue,
 						Reason:  "DeactivatedDueToAdmissionCheck",
-						Message: "The workload is deactivated due to Admission check(s): check-1, were rejected",
+						Message: `The workload is deactivated due to AdmissionCheck in Rejected state: "check-1"`,
 					},
 				).
 				SchedulingStatsEviction(
@@ -964,7 +1014,7 @@ func TestReconcile(t *testing.T) {
 					Key:       types.NamespacedName{Namespace: "ns", Name: "wl"},
 					EventType: "Normal",
 					Reason:    "EvictedDueToDeactivatedDueToAdmissionCheck",
-					Message:   "The workload is deactivated due to Admission check(s): check-1, were rejected",
+					Message:   `The workload is deactivated due to AdmissionCheck in Rejected state: "check-1"`,
 				},
 			},
 		},
@@ -997,7 +1047,7 @@ func TestReconcile(t *testing.T) {
 					Type:    "Evicted",
 					Status:  "True",
 					Reason:  "AdmissionCheck",
-					Message: "At least one admission check is false",
+					Message: `Evicted due to AdmissionCheck in Retry state: "check-1"`,
 				}).
 				SchedulingStatsEviction(
 					kueue.WorkloadSchedulingStatsEviction{
@@ -1011,7 +1061,163 @@ func TestReconcile(t *testing.T) {
 					Key:       types.NamespacedName{Namespace: "ns", Name: "wl"},
 					EventType: "Normal",
 					Reason:    "EvictedDueToAdmissionCheck",
-					Message:   "At least one admission check is false",
+					Message:   `Evicted due to AdmissionCheck in Retry state: "check-1"`,
+				},
+			},
+		},
+		"workload with retry checks and unhealthy nodes should be evicted and checks should be pending": {
+			workload: utiltestingapi.MakeWorkload("wl", "ns").
+				ReserveQuotaAt(utiltestingapi.MakeAdmission("q1").Obj(), now).
+				ControllerReference(batchv1.SchemeGroupVersion.WithKind("Job"), "ownername", "owneruid").
+				AdmissionChecks(kueue.AdmissionCheckState{
+					Name:  "check-1",
+					State: kueue.CheckStateRetry,
+				}, kueue.AdmissionCheckState{
+					Name:  "check-2",
+					State: kueue.CheckStateReady,
+				}).
+				Condition(metav1.Condition{
+					Type:               kueue.WorkloadAdmitted,
+					Status:             metav1.ConditionTrue,
+					LastTransitionTime: metav1.NewTime(now),
+					Reason:             "ByTest",
+					Message:            "The workload is admitted",
+				}).
+				AdmittedAt(true, now).
+				UnhealthyNodes("xyz").
+				Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
+				ReserveQuotaAt(utiltestingapi.MakeAdmission("q1").Obj(), now).
+				ControllerReference(batchv1.SchemeGroupVersion.WithKind("Job"), "ownername", "owneruid").
+				AdmissionChecks(kueue.AdmissionCheckState{
+					Name:       "check-1",
+					State:      kueue.CheckStatePending,
+					Message:    "Reset to Pending after eviction. Previously: Retry",
+					RetryCount: ptr.To(int32(1)),
+				}, kueue.AdmissionCheckState{
+					Name:    "check-2",
+					State:   kueue.CheckStatePending,
+					Message: "Reset to Pending after eviction. Previously: Ready",
+				}).
+				Condition(metav1.Condition{
+					Type:               kueue.WorkloadAdmitted,
+					Status:             metav1.ConditionTrue,
+					LastTransitionTime: metav1.NewTime(now),
+					Reason:             "ByTest",
+					Message:            "The workload is admitted",
+				}).
+				Condition(metav1.Condition{
+					Type:    "Evicted",
+					Status:  "True",
+					Reason:  "AdmissionCheck",
+					Message: `Evicted due to AdmissionCheck in Retry state: "check-1"`,
+				}).
+				AdmittedAt(true, now).
+				UnhealthyNodes("xyz").
+				SchedulingStatsEviction(
+					kueue.WorkloadSchedulingStatsEviction{
+						Reason: kueue.WorkloadEvictedByAdmissionCheck,
+						Count:  1,
+					},
+				).
+				Obj(),
+			wantWorkloadUseMergePatch: utiltestingapi.MakeWorkload("wl", "ns").
+				ReserveQuotaAt(utiltestingapi.MakeAdmission("q1").Obj(), now).
+				ControllerReference(batchv1.SchemeGroupVersion.WithKind("Job"), "ownername", "owneruid").
+				AdmissionChecks(kueue.AdmissionCheckState{
+					Name:       "check-1",
+					State:      kueue.CheckStatePending,
+					Message:    "Reset to Pending after eviction. Previously: Retry",
+					RetryCount: ptr.To(int32(1)),
+				}, kueue.AdmissionCheckState{
+					Name:    "check-2",
+					State:   kueue.CheckStatePending,
+					Message: "Reset to Pending after eviction. Previously: Ready",
+				}).
+				Condition(metav1.Condition{
+					Type:               kueue.WorkloadAdmitted,
+					Status:             metav1.ConditionTrue,
+					LastTransitionTime: metav1.NewTime(now),
+					Reason:             "ByTest",
+					Message:            "The workload is admitted",
+				}).
+				Condition(metav1.Condition{
+					Type:    "Evicted",
+					Status:  "True",
+					Reason:  "AdmissionCheck",
+					Message: `Evicted due to AdmissionCheck in Retry state: "check-1"`,
+				}).
+				AdmittedAt(true, now).
+				SchedulingStatsEviction(
+					kueue.WorkloadSchedulingStatsEviction{
+						Reason: kueue.WorkloadEvictedByAdmissionCheck,
+						Count:  1,
+					},
+				).
+				Obj(),
+			wantEvents: []utiltesting.EventRecord{
+				{
+					Key:       types.NamespacedName{Namespace: "ns", Name: "wl"},
+					EventType: "Normal",
+					Reason:    "EvictedDueToAdmissionCheck",
+					Message:   `Evicted due to AdmissionCheck in Retry state: "check-1"`,
+				},
+			},
+		},
+		"workload with retry checks should be evicted and checks should be pending, with message": {
+			workload: utiltestingapi.MakeWorkload("wl", "ns").
+				ReserveQuotaAt(utiltestingapi.MakeAdmission("q1").Obj(), now).
+				ControllerReference(batchv1.SchemeGroupVersion.WithKind("Job"), "ownername", "owneruid").
+				AdmissionChecks(kueue.AdmissionCheckState{
+					Name:    "check-1",
+					State:   kueue.CheckStateRetry,
+					Message: "infrastructure not prepared",
+				}, kueue.AdmissionCheckState{
+					Name:  "check-2",
+					State: kueue.CheckStateReady,
+				}, kueue.AdmissionCheckState{
+					Name:    "check-3",
+					State:   kueue.CheckStateRetry,
+					Message: "budget exhausted",
+				}).
+				Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
+				ReserveQuotaAt(utiltestingapi.MakeAdmission("q1").Obj(), now).
+				ControllerReference(batchv1.SchemeGroupVersion.WithKind("Job"), "ownername", "owneruid").
+				AdmissionChecks(kueue.AdmissionCheckState{
+					Name:       "check-1",
+					State:      kueue.CheckStatePending,
+					Message:    "Reset to Pending after eviction. Previously: Retry",
+					RetryCount: ptr.To(int32(1)),
+				}, kueue.AdmissionCheckState{
+					Name:    "check-2",
+					State:   kueue.CheckStatePending,
+					Message: "Reset to Pending after eviction. Previously: Ready",
+				}, kueue.AdmissionCheckState{
+					Name:       "check-3",
+					State:      kueue.CheckStatePending,
+					Message:    "Reset to Pending after eviction. Previously: Retry",
+					RetryCount: ptr.To(int32(1)),
+				}).
+				Condition(metav1.Condition{
+					Type:    "Evicted",
+					Status:  "True",
+					Reason:  "AdmissionCheck",
+					Message: `Evicted due to AdmissionChecks in Retry state: "check-1" (infrastructure not prepared); "check-3" (budget exhausted)`,
+				}).
+				SchedulingStatsEviction(
+					kueue.WorkloadSchedulingStatsEviction{
+						Reason: kueue.WorkloadEvictedByAdmissionCheck,
+						Count:  1,
+					},
+				).
+				Obj(),
+			wantEvents: []utiltesting.EventRecord{
+				{
+					Key:       types.NamespacedName{Namespace: "ns", Name: "wl"},
+					EventType: "Normal",
+					Reason:    "EvictedDueToAdmissionCheck",
+					Message:   `Evicted due to AdmissionChecks in Retry state: "check-1" (infrastructure not prepared); "check-3" (budget exhausted)`,
 				},
 			},
 		},
@@ -1259,6 +1465,117 @@ func TestReconcile(t *testing.T) {
 					Message:            "At least one pod has failed, waiting for recovery",
 				}).
 				//  10s * 2^(11-1) = 10240s > requeuingBackoffMaxSeconds; then wait time should be limited to requeuingBackoffMaxSeconds
+				RequeueState(ptr.To[int32](1), ptr.To(metav1.NewTime(now.Add(7200*time.Second).Truncate(time.Second)))).
+				SchedulingStatsEviction(
+					kueue.WorkloadSchedulingStatsEviction{
+						Reason:          kueue.WorkloadEvictedByPodsReadyTimeout,
+						UnderlyingCause: kueue.WorkloadWaitForRecovery,
+						Count:           1,
+					},
+				).
+				Obj(),
+			wantEvents: []utiltesting.EventRecord{
+				{
+					Key:       types.NamespacedName{Name: "wl", Namespace: "ns"},
+					EventType: corev1.EventTypeNormal,
+					Reason:    "EvictedDueToPodsReadyTimeout",
+					Message:   "Exceeded the PodsReady timeout ns/wl",
+				},
+			},
+		},
+		"recovery time with unhealthy nodes should still be limited to recoveryTimeout": {
+			reconcilerOpts: []Option{
+				WithWaitForPodsReady(&waitForPodsReadyConfig{
+					timeout:                     5 * time.Minute,
+					recoveryTimeout:             ptr.To(3 * time.Second),
+					requeuingBackoffLimitCount:  ptr.To[int32](100),
+					requeuingBackoffBaseSeconds: 10,
+					requeuingBackoffJitter:      0,
+					requeuingBackoffMaxDuration: time.Duration(7200) * time.Second,
+				}),
+			},
+			workload: utiltestingapi.MakeWorkload("wl", "ns").
+				ReserveQuotaAt(utiltestingapi.MakeAdmission("q1").Obj(), now).
+				AdmissionCheck(kueue.AdmissionCheckState{
+					Name:  "check",
+					State: kueue.CheckStateReady,
+				}).
+				Generation(1).
+				Condition(metav1.Condition{
+					Type:               kueue.WorkloadAdmitted,
+					Status:             metav1.ConditionTrue,
+					LastTransitionTime: metav1.NewTime(now.Add(-5 * time.Minute)),
+					Reason:             "ByTest",
+					Message:            "Admitted by ClusterQueue q1",
+				}).
+				Condition(metav1.Condition{
+					Type:               kueue.WorkloadPodsReady,
+					Status:             metav1.ConditionFalse,
+					LastTransitionTime: metav1.NewTime(now.Add(-3 * time.Minute)),
+					Reason:             kueue.WorkloadWaitForRecovery,
+					Message:            "At least one pod has failed, waiting for recovery",
+				}).
+				AdmittedAt(true, now).
+				UnhealthyNodes("xyz").
+				Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
+				ReserveQuotaAt(utiltestingapi.MakeAdmission("q1").Obj(), now).
+				AdmittedAt(true, now).
+				AdmissionCheck(kueue.AdmissionCheckState{
+					Name:    "check",
+					State:   kueue.CheckStatePending,
+					Message: "Reset to Pending after eviction. Previously: Ready",
+				}).
+				Generation(1).
+				Condition(metav1.Condition{
+					Type:               kueue.WorkloadEvicted,
+					Status:             metav1.ConditionTrue,
+					Reason:             kueue.WorkloadEvictedByPodsReadyTimeout,
+					Message:            "Exceeded the PodsReady timeout ns/wl",
+					ObservedGeneration: 1,
+				}).
+				Condition(metav1.Condition{
+					Type:               kueue.WorkloadPodsReady,
+					Status:             metav1.ConditionFalse,
+					LastTransitionTime: metav1.NewTime(now),
+					Reason:             kueue.WorkloadWaitForRecovery,
+					Message:            "At least one pod has failed, waiting for recovery",
+				}).
+				AdmittedAt(true, now).
+				UnhealthyNodes("xyz").
+				RequeueState(ptr.To[int32](1), ptr.To(metav1.NewTime(now.Add(7200*time.Second).Truncate(time.Second)))).
+				SchedulingStatsEviction(
+					kueue.WorkloadSchedulingStatsEviction{
+						Reason:          kueue.WorkloadEvictedByPodsReadyTimeout,
+						UnderlyingCause: kueue.WorkloadWaitForRecovery,
+						Count:           1,
+					},
+				).
+				Obj(),
+			wantWorkloadUseMergePatch: utiltestingapi.MakeWorkload("wl", "ns").
+				ReserveQuotaAt(utiltestingapi.MakeAdmission("q1").Obj(), now).
+				AdmittedAt(true, now).
+				AdmissionCheck(kueue.AdmissionCheckState{
+					Name:    "check",
+					State:   kueue.CheckStatePending,
+					Message: "Reset to Pending after eviction. Previously: Ready",
+				}).
+				Generation(1).
+				Condition(metav1.Condition{
+					Type:               kueue.WorkloadEvicted,
+					Status:             metav1.ConditionTrue,
+					Reason:             kueue.WorkloadEvictedByPodsReadyTimeout,
+					Message:            "Exceeded the PodsReady timeout ns/wl",
+					ObservedGeneration: 1,
+				}).
+				Condition(metav1.Condition{
+					Type:               kueue.WorkloadPodsReady,
+					Status:             metav1.ConditionFalse,
+					LastTransitionTime: metav1.NewTime(now),
+					Reason:             kueue.WorkloadWaitForRecovery,
+					Message:            "At least one pod has failed, waiting for recovery",
+				}).
+				AdmittedAt(true, now).
 				RequeueState(ptr.To[int32](1), ptr.To(metav1.NewTime(now.Add(7200*time.Second).Truncate(time.Second)))).
 				SchedulingStatsEviction(
 					kueue.WorkloadSchedulingStatsEviction{
