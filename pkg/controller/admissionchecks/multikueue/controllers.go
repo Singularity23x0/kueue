@@ -17,10 +17,12 @@ limitations under the License.
 package multikueue
 
 import (
+	"context"
 	"time"
 
 	"sigs.k8s.io/cluster-inventory-api/pkg/credentials"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	configapi "sigs.k8s.io/kueue/apis/config/v1beta2"
 	"sigs.k8s.io/kueue/pkg/constants"
@@ -48,6 +50,29 @@ type SetupOptions struct {
 }
 
 type SetupOption func(o *SetupOptions)
+
+type reconcileFunction = func(ctx context.Context, req reconcile.Request) (reconcile.Result, error)
+
+type leaderAwareReconciler struct {
+	elected           <-chan struct{}
+	leaderReconcile   reconcileFunction
+	followerReconcile reconcileFunction
+}
+
+func (lar *leaderAwareReconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+	select {
+	case <-lar.elected:
+		return lar.leaderReconcile(ctx, req)
+	default:
+		return lar.followerReconcile(ctx, req)
+	}
+}
+
+func (lar *leaderAwareReconciler) configureLeaderAwareReconciliation(mgr ctrl.Manager, lr reconcileFunction, fr reconcileFunction) {
+	lar.elected = mgr.Elected()
+	lar.leaderReconcile = lr
+	lar.followerReconcile = fr
+}
 
 // WithGCInterval - sets the interval between two garbage collection runs.
 // If 0 the garbage collection is disabled.
