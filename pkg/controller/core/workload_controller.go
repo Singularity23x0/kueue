@@ -67,6 +67,7 @@ import (
 	utilslices "sigs.k8s.io/kueue/pkg/util/slices"
 	stringsutils "sigs.k8s.io/kueue/pkg/util/strings"
 	"sigs.k8s.io/kueue/pkg/workload"
+	"sigs.k8s.io/kueue/pkg/workload/concurrentadmission"
 	"sigs.k8s.io/kueue/pkg/workloadslicing"
 )
 
@@ -238,6 +239,16 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
+	if features.Enabled(features.ConcurrentAdmission) {
+		enabled := r.queues.ConcurrentAdmissionEnabledFor(&wl)
+		if enabled && !concurrentadmission.IsVariant(&wl) && !concurrentadmission.IsParent(&wl) {
+			// Workload is a Parent without set Parent annotation yet
+			concurrentadmission.SetParentVariantLabel(&wl)
+			err := r.client.Update(ctx, &wl)
+			return ctrl.Result{}, client.IgnoreNotFound(err)
+		}
+	}
+
 	finishedCond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadFinished)
 	if finishedCond != nil && finishedCond.Status == metav1.ConditionTrue {
 		if r.workloadRetention == nil || r.workloadRetention.afterFinished == nil {
@@ -383,14 +394,13 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	if workload.IsActive(&wl) {
 		if apimeta.IsStatusConditionTrue(wl.Status.Conditions, kueue.WorkloadDeactivationTarget) {
-			wl.Spec.Active = ptr.To(false)
+			wl.Spec.Active = new(false)
 			err := r.client.Update(ctx, &wl)
 			return ctrl.Result{}, client.IgnoreNotFound(err)
 		}
 
 		if wl.Status.RequeueState != nil && wl.Status.RequeueState.RequeueAt != nil {
-			requeueAfter := ptr.To(wl.Status.RequeueState.RequeueAt.Sub(r.clock.Now()))
-			if requeueAfter != nil && *requeueAfter > 0 {
+			if requeueAfter := new(wl.Status.RequeueState.RequeueAt.Sub(r.clock.Now())); *requeueAfter > 0 {
 				log.V(3).Info("Waiting for backoff to finish", "backoff", *requeueAfter)
 				return reconcile.Result{RequeueAfter: *requeueAfter}, nil
 			}
@@ -739,6 +749,10 @@ func buildAdmissionChecksMessage(checks []kueue.AdmissionCheckState, state kueue
 // reconcileCheckBasedEviction evicts or deactivates the given Workload if any admission checks have failed.
 // Returns true if the Workload was rejected or deactivated, and false otherwise.
 func (r *WorkloadReconciler) reconcileCheckBasedEviction(ctx context.Context, wl *kueue.Workload) (bool, error) {
+	if features.Enabled(features.ConcurrentAdmission) && concurrentadmission.IsParent(wl) {
+		// Parent Workloads are not supposed to have admission checks.
+		return false, nil
+	}
 	if workload.IsEvicted(wl) || (!workload.HasRetryChecks(wl) && !workload.HasRejectedChecks(wl)) {
 		return false, nil
 	}
@@ -768,6 +782,10 @@ func (r *WorkloadReconciler) reconcileCheckBasedEviction(ctx context.Context, wl
 }
 
 func (r *WorkloadReconciler) reconcileSyncAdmissionChecks(ctx context.Context, wl *kueue.Workload, cq *kueue.ClusterQueue) (bool, error) {
+	if features.Enabled(features.ConcurrentAdmission) && concurrentadmission.IsParent(wl) {
+		// Parent Workloads are not supposed to have admission checks.
+		return false, nil
+	}
 	log := ctrl.LoggerFrom(ctx)
 	admissionChecks := workload.AdmissionChecksForWorkload(log, wl, cq)
 	newChecks, shouldUpdate := syncAdmissionCheckConditions(wl.Status.AdmissionChecks, admissionChecks, r.clock)
@@ -983,6 +1001,10 @@ func syncAdmissionCheckConditions(conds []kueue.AdmissionCheckState, admissionCh
 }
 
 func (r *WorkloadReconciler) reconcileNotReadyTimeout(ctx context.Context, req ctrl.Request, wl *kueue.Workload) (time.Duration, error) {
+	if features.Enabled(features.ConcurrentAdmission) && concurrentadmission.IsVariant(wl) {
+		// Variant Workloads are not supposed to have PodsReady condition, it's Parent Workload responsibility.
+		return 0, nil
+	}
 	log := ctrl.LoggerFrom(ctx)
 
 	if !workload.IsActive(wl) || workload.IsEvicted(wl) {
@@ -1163,7 +1185,7 @@ func (r *WorkloadReconciler) Update(e event.TypedUpdateEvent[*kueue.Workload]) b
 		if dra.NeedsDRAReconcile(e.ObjectNew) {
 			log.V(2).Info("Skipping queue update for DRA workload - handled in Reconcile")
 		} else {
-			if err := r.queues.UpdateWorkload(log, wlCopy); err != nil {
+			if err := r.queues.AddOrUpdateWorkload(log, wlCopy); err != nil {
 				log.V(2).Info("ignored an error for now", "error", err)
 			}
 		}
@@ -1175,7 +1197,10 @@ func (r *WorkloadReconciler) Update(e event.TypedUpdateEvent[*kueue.Workload]) b
 		if afs.Enabled(r.admissionFSConfig) && status == workload.StatusAdmitted && r.cache.ClusterQueueUsesAdmissionFairSharing(wlCopy.Status.Admission.ClusterQueue) {
 			r.updateAfsConsumedUsage(log, wlCopy)
 		}
-	case (prevStatus == workload.StatusQuotaReserved || prevStatus == workload.StatusAdmitted) && status == workload.StatusPending:
+	case workload.FromQuotaReservedOrAdmittedToPending(prevStatus, status):
+		if cq, reason, latency, ok := workload.EvictionPendingLatency(e.ObjectOld, e.ObjectNew, r.clock.Now()); ok {
+			metrics.ReportWorkloadEvictionLatency(cq, reason, latency, r.customLabels.CQGet(cq), r.roleTracker)
+		}
 		var backoff time.Duration
 		if wlCopy.Status.RequeueState != nil && wlCopy.Status.RequeueState.RequeueAt != nil {
 			backoff = time.Until(e.ObjectNew.Status.RequeueState.RequeueAt.Time)
@@ -1291,7 +1316,7 @@ func (r *WorkloadReconciler) SetupWithManager(mgr ctrl.Manager, cfg *config.Conf
 		)).
 		WatchesRawSource(source.Channel(r.draReconcileChannel, deh)).
 		WithOptions(controller.Options{
-			NeedLeaderElection:      ptr.To(false),
+			NeedLeaderElection:      new(false),
 			MaxConcurrentReconciles: mgr.GetControllerOptions().GroupKindConcurrency[kueue.GroupVersion.WithKind("Workload").GroupKind().String()],
 			LogConstructor:          roletracker.NewLogConstructor(r.roleTracker, "workload-reconciler"),
 		}).

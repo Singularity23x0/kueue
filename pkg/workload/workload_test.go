@@ -41,6 +41,7 @@ import (
 
 	config "sigs.k8s.io/kueue/apis/config/v1beta2"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	controllerconstants "sigs.k8s.io/kueue/pkg/controller/constants"
 	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/resources"
 	"sigs.k8s.io/kueue/pkg/util/admissioncheck"
@@ -61,6 +62,35 @@ var (
 		errors.New("object was modified"),
 	)
 )
+
+func TestFromQuotaReservedOrAdmittedToPending(t *testing.T) {
+	cases := map[string]struct {
+		prev, new string
+		want      bool
+	}{
+		"quotaReserved to pending":  {StatusQuotaReserved, StatusPending, true},
+		"admitted to pending":       {StatusAdmitted, StatusPending, true},
+		"pending to pending":        {StatusPending, StatusPending, false},
+		"pending to quotaReserved":  {StatusPending, StatusQuotaReserved, false},
+		"pending to admitted":       {StatusPending, StatusAdmitted, false},
+		"quotaReserved to admitted": {StatusQuotaReserved, StatusAdmitted, false},
+		"admitted to quotaReserved": {StatusAdmitted, StatusQuotaReserved, false},
+		"finished to pending":       {StatusFinished, StatusPending, false},
+		"quotaReserved to finished": {StatusQuotaReserved, StatusFinished, false},
+		"admitted to finished":      {StatusAdmitted, StatusFinished, false},
+		"same quotaReserved":        {StatusQuotaReserved, StatusQuotaReserved, false},
+		"same admitted":             {StatusAdmitted, StatusAdmitted, false},
+		"pending to finished":       {StatusPending, StatusFinished, false},
+		"finished to quotaReserved": {StatusFinished, StatusQuotaReserved, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := FromQuotaReservedOrAdmittedToPending(tc.prev, tc.new); got != tc.want {
+				t.Errorf("FromQuotaReservedOrAdmittedToPending(%q, %q) = %v, want %v", tc.prev, tc.new, got, tc.want)
+			}
+		})
+	}
+}
 
 func TestNewInfo(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
@@ -2360,7 +2390,7 @@ func TestSetRequeueState(t *testing.T) {
 			waitUntil:      metav1.NewTime(futureTime),
 			incrementCount: false,
 			wantUpdated:    true,
-			wantRequeueAt:  ptr.To(metav1.NewTime(futureTime)),
+			wantRequeueAt:  new(metav1.NewTime(futureTime)),
 			wantCount:      nil,
 		},
 		"should initialize and set time and count when requeue state is nil with increment": {
@@ -2372,14 +2402,14 @@ func TestSetRequeueState(t *testing.T) {
 			waitUntil:      metav1.NewTime(futureTime),
 			incrementCount: true,
 			wantUpdated:    true,
-			wantRequeueAt:  ptr.To(metav1.NewTime(futureTime)),
+			wantRequeueAt:  new(metav1.NewTime(futureTime)),
 			wantCount:      ptr.To[int32](1),
 		},
 		"should update time when existing requeue time is earlier": {
 			workload: &kueue.Workload{
 				Status: kueue.WorkloadStatus{
 					RequeueState: &kueue.RequeueState{
-						RequeueAt: ptr.To(metav1.NewTime(pastTime)),
+						RequeueAt: new(metav1.NewTime(pastTime)),
 						Count:     ptr.To[int32](2),
 					},
 				},
@@ -2387,14 +2417,14 @@ func TestSetRequeueState(t *testing.T) {
 			waitUntil:      metav1.NewTime(futureTime),
 			incrementCount: false,
 			wantUpdated:    true,
-			wantRequeueAt:  ptr.To(metav1.NewTime(futureTime)),
+			wantRequeueAt:  new(metav1.NewTime(futureTime)),
 			wantCount:      ptr.To[int32](2),
 		},
 		"should not update time when existing requeue time is later": {
 			workload: &kueue.Workload{
 				Status: kueue.WorkloadStatus{
 					RequeueState: &kueue.RequeueState{
-						RequeueAt: ptr.To(metav1.NewTime(evenMoreFutureTime)),
+						RequeueAt: new(metav1.NewTime(evenMoreFutureTime)),
 						Count:     ptr.To[int32](3),
 					},
 				},
@@ -2402,14 +2432,14 @@ func TestSetRequeueState(t *testing.T) {
 			waitUntil:      metav1.NewTime(futureTime),
 			incrementCount: false,
 			wantUpdated:    false,
-			wantRequeueAt:  ptr.To(metav1.NewTime(evenMoreFutureTime)),
+			wantRequeueAt:  new(metav1.NewTime(evenMoreFutureTime)),
 			wantCount:      ptr.To[int32](3),
 		},
 		"should increment count but keep later requeue time": {
 			workload: &kueue.Workload{
 				Status: kueue.WorkloadStatus{
 					RequeueState: &kueue.RequeueState{
-						RequeueAt: ptr.To(metav1.NewTime(evenMoreFutureTime)),
+						RequeueAt: new(metav1.NewTime(evenMoreFutureTime)),
 						Count:     ptr.To[int32](3),
 					},
 				},
@@ -2417,14 +2447,14 @@ func TestSetRequeueState(t *testing.T) {
 			waitUntil:      metav1.NewTime(futureTime),
 			incrementCount: true,
 			wantUpdated:    true,
-			wantRequeueAt:  ptr.To(metav1.NewTime(evenMoreFutureTime)),
+			wantRequeueAt:  new(metav1.NewTime(evenMoreFutureTime)),
 			wantCount:      ptr.To[int32](4),
 		},
 		"should increment count when requeue time is same": {
 			workload: &kueue.Workload{
 				Status: kueue.WorkloadStatus{
 					RequeueState: &kueue.RequeueState{
-						RequeueAt: ptr.To(metav1.NewTime(futureTime)),
+						RequeueAt: new(metav1.NewTime(futureTime)),
 						Count:     ptr.To[int32](1),
 					},
 				},
@@ -2432,14 +2462,14 @@ func TestSetRequeueState(t *testing.T) {
 			waitUntil:      metav1.NewTime(futureTime),
 			incrementCount: true,
 			wantUpdated:    true,
-			wantRequeueAt:  ptr.To(metav1.NewTime(futureTime)),
+			wantRequeueAt:  new(metav1.NewTime(futureTime)),
 			wantCount:      ptr.To[int32](2),
 		},
 		"should increment from zero count": {
 			workload: &kueue.Workload{
 				Status: kueue.WorkloadStatus{
 					RequeueState: &kueue.RequeueState{
-						RequeueAt: ptr.To(metav1.NewTime(pastTime)),
+						RequeueAt: new(metav1.NewTime(pastTime)),
 						Count:     ptr.To[int32](0),
 					},
 				},
@@ -2447,14 +2477,14 @@ func TestSetRequeueState(t *testing.T) {
 			waitUntil:      metav1.NewTime(futureTime),
 			incrementCount: true,
 			wantUpdated:    true,
-			wantRequeueAt:  ptr.To(metav1.NewTime(futureTime)),
+			wantRequeueAt:  new(metav1.NewTime(futureTime)),
 			wantCount:      ptr.To[int32](1),
 		},
 		"should handle zero time in requeue state": {
 			workload: &kueue.Workload{
 				Status: kueue.WorkloadStatus{
 					RequeueState: &kueue.RequeueState{
-						RequeueAt: ptr.To(metav1.NewTime(time.Time{})),
+						RequeueAt: new(metav1.NewTime(time.Time{})),
 						Count:     ptr.To[int32](0),
 					},
 				},
@@ -2462,7 +2492,7 @@ func TestSetRequeueState(t *testing.T) {
 			waitUntil:      metav1.NewTime(futureTime),
 			incrementCount: true,
 			wantUpdated:    true,
-			wantRequeueAt:  ptr.To(metav1.NewTime(futureTime)),
+			wantRequeueAt:  new(metav1.NewTime(futureTime)),
 			wantCount:      ptr.To[int32](1),
 		},
 	}
@@ -2697,6 +2727,253 @@ func TestFinish(t *testing.T) {
 		})
 	}
 }
+
+func TestEvictionPendingLatency(t *testing.T) {
+	evictTime := time.Date(2024, 3, 15, 12, 0, 0, 0, time.UTC)
+	metricNow := evictTime.Add(30 * time.Second)
+
+	evictedByPreemption := metav1.Condition{
+		Type:               kueue.WorkloadEvicted,
+		Status:             metav1.ConditionTrue,
+		Reason:             kueue.WorkloadEvictedByPreemption,
+		LastTransitionTime: metav1.NewTime(evictTime),
+	}
+	otherEvicted := metav1.Condition{
+		Type:               kueue.WorkloadEvicted,
+		Status:             metav1.ConditionTrue,
+		Reason:             kueue.WorkloadEvictedByPodsReadyTimeout,
+		LastTransitionTime: metav1.NewTime(evictTime),
+	}
+	evictedByAdmissionCheck := metav1.Condition{
+		Type:               kueue.WorkloadEvicted,
+		Status:             metav1.ConditionTrue,
+		Reason:             kueue.WorkloadEvictedByAdmissionCheck,
+		LastTransitionTime: metav1.NewTime(evictTime),
+	}
+	admittedTrue := metav1.Condition{
+		Type:               kueue.WorkloadAdmitted,
+		Status:             metav1.ConditionTrue,
+		LastTransitionTime: metav1.NewTime(evictTime),
+	}
+	quotaReservedTrue := metav1.Condition{
+		Type:               kueue.WorkloadQuotaReserved,
+		Status:             metav1.ConditionTrue,
+		LastTransitionTime: metav1.NewTime(evictTime),
+	}
+
+	cases := []struct {
+		name        string
+		oldWl       *kueue.Workload
+		newWl       *kueue.Workload
+		now         time.Time
+		wantOK      bool
+		wantCQ      kueue.ClusterQueueReference
+		wantReason  string
+		wantLatency time.Duration
+	}{
+		{
+			name:   "nil old workload",
+			oldWl:  nil,
+			newWl:  &kueue.Workload{Status: kueue.WorkloadStatus{Conditions: []metav1.Condition{evictedByPreemption}}},
+			now:    metricNow,
+			wantOK: false,
+		},
+		{
+			name: "admitted to pending due to preemption eviction (cq from old admission)",
+			oldWl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Admission:  &kueue.Admission{ClusterQueue: "cq-a"},
+					Conditions: []metav1.Condition{admittedTrue},
+				},
+			},
+			newWl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Conditions: []metav1.Condition{evictedByPreemption},
+				},
+			},
+			now:         metricNow,
+			wantOK:      true,
+			wantCQ:      "cq-a",
+			wantReason:  kueue.WorkloadEvictedByPreemption,
+			wantLatency: 30 * time.Second,
+		},
+		{
+			name: "quota reserved to pending due to preemption eviction",
+			oldWl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Admission:  &kueue.Admission{ClusterQueue: "cq-b"},
+					Conditions: []metav1.Condition{quotaReservedTrue},
+				},
+			},
+			newWl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Conditions: []metav1.Condition{evictedByPreemption},
+				},
+			},
+			now:         metricNow,
+			wantOK:      true,
+			wantCQ:      "cq-b",
+			wantReason:  kueue.WorkloadEvictedByPreemption,
+			wantLatency: 30 * time.Second,
+		},
+		{
+			name: "admitted to pending due to PodsReadyTimeout eviction",
+			oldWl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Admission:  &kueue.Admission{ClusterQueue: "cq-a"},
+					Conditions: []metav1.Condition{admittedTrue},
+				},
+			},
+			newWl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Conditions: []metav1.Condition{otherEvicted},
+				},
+			},
+			now:         metricNow,
+			wantOK:      true,
+			wantCQ:      "cq-a",
+			wantReason:  kueue.WorkloadEvictedByPodsReadyTimeout,
+			wantLatency: 30 * time.Second,
+		},
+		{
+			name: "admitted to pending due to AdmissionCheck eviction",
+			oldWl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Admission:  &kueue.Admission{ClusterQueue: "cq-a"},
+					Conditions: []metav1.Condition{admittedTrue},
+				},
+			},
+			newWl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Conditions: []metav1.Condition{evictedByAdmissionCheck},
+				},
+			},
+			now:         metricNow,
+			wantOK:      true,
+			wantCQ:      "cq-a",
+			wantReason:  kueue.WorkloadEvictedByAdmissionCheck,
+			wantLatency: 30 * time.Second,
+		},
+		{
+			name: "skip when old admission missing (no cluster queue for metric)",
+			oldWl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{},
+			},
+			newWl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Conditions: []metav1.Condition{evictedByPreemption},
+				},
+			},
+			now:    metricNow,
+			wantOK: false,
+		},
+		{
+			name: "skip when cluster queue empty string",
+			oldWl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Admission:  &kueue.Admission{ClusterQueue: ""},
+					Conditions: []metav1.Condition{admittedTrue},
+				},
+			},
+			newWl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Conditions: []metav1.Condition{evictedByPreemption},
+				},
+			},
+			now:    metricNow,
+			wantOK: false,
+		},
+		{
+			name: "skip when new status not pending (still admitted)",
+			oldWl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Admission:  &kueue.Admission{ClusterQueue: "cq-a"},
+					Conditions: []metav1.Condition{admittedTrue},
+				},
+			},
+			newWl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Admission:  &kueue.Admission{ClusterQueue: "cq-a"},
+					Conditions: []metav1.Condition{admittedTrue, evictedByPreemption},
+				},
+			},
+			now:    metricNow,
+			wantOK: false,
+		},
+		{
+			name: "skip when previous status already pending",
+			oldWl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Conditions: []metav1.Condition{evictedByPreemption},
+				},
+			},
+			newWl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Conditions: []metav1.Condition{evictedByPreemption},
+				},
+			},
+			now:    metricNow,
+			wantOK: false,
+		},
+		{
+			name: "skip missing eviction condition",
+			oldWl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Admission:  &kueue.Admission{ClusterQueue: "cq-a"},
+					Conditions: []metav1.Condition{admittedTrue},
+				},
+			},
+			newWl:  &kueue.Workload{Status: kueue.WorkloadStatus{}},
+			now:    metricNow,
+			wantOK: false,
+		},
+		{
+			name: "skip eviction condition not true",
+			oldWl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Admission:  &kueue.Admission{ClusterQueue: "cq-a"},
+					Conditions: []metav1.Condition{admittedTrue},
+				},
+			},
+			newWl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:               kueue.WorkloadEvicted,
+							Status:             metav1.ConditionFalse,
+							Reason:             kueue.WorkloadEvictedByPreemption,
+							LastTransitionTime: metav1.NewTime(evictTime),
+						},
+					},
+				},
+			},
+			now:    metricNow,
+			wantOK: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotCQ, gotReason, gotLatency, gotOK := EvictionPendingLatency(tc.oldWl, tc.newWl, tc.now)
+			if gotOK != tc.wantOK {
+				t.Fatalf("ok: got %v want %v (cq=%q reason=%q latency=%v)", gotOK, tc.wantOK, gotCQ, gotReason, gotLatency)
+			}
+			if !tc.wantOK {
+				return
+			}
+			if gotCQ != tc.wantCQ {
+				t.Errorf("cluster queue: got %q want %q", gotCQ, tc.wantCQ)
+			}
+			if gotReason != tc.wantReason {
+				t.Errorf("reason: got %q want %q", gotReason, tc.wantReason)
+			}
+			if gotLatency != tc.wantLatency {
+				t.Errorf("latency: got %v want %v", gotLatency, tc.wantLatency)
+			}
+		})
+	}
+}
+
 func TestSchedulingHash(t *testing.T) {
 	cases := map[string]struct {
 		wl1          *kueue.Workload
@@ -2759,6 +3036,25 @@ func TestSchedulingHash(t *testing.T) {
 				features.PriorityBoost:                true,
 			},
 		},
+		"same spec, different allowed flavors annotation, concurrent admission enabled produces different hash": {
+			wl1: func() *kueue.Workload {
+				wl := utiltestingapi.MakeWorkload("wl1", "ns").
+					Request(corev1.ResourceCPU, "1").Obj()
+				wl.Annotations = map[string]string{controllerconstants.WorkloadAllowedResourceFlavorAnnotation: "flavor1"}
+				return wl
+			}(),
+			wl2: func() *kueue.Workload {
+				wl := utiltestingapi.MakeWorkload("wl2", "ns").
+					Request(corev1.ResourceCPU, "1").Obj()
+				wl.Annotations = map[string]string{controllerconstants.WorkloadAllowedResourceFlavorAnnotation: "flavor2"}
+				return wl
+			}(),
+			wantSame: false,
+			featureGates: map[featuregate.Feature]bool{
+				features.SchedulingEquivalenceHashing: true,
+				features.ConcurrentAdmission:          true,
+			},
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -2806,7 +3102,7 @@ func TestUsedNodes(t *testing.T) {
 										{
 											DomainCount: 1,
 											ValuesPerLevel: []kueue.TopologyAssignmentSliceLevelValues{
-												{Universal: ptr.To("zone-1")},
+												{Universal: new("zone-1")},
 												{Individual: &kueue.TopologyAssignmentSliceLevelIndividualValues{
 													Roots: []string{"node-1"},
 												}},
@@ -2837,7 +3133,7 @@ func TestUsedNodes(t *testing.T) {
 										{
 											DomainCount: 1,
 											ValuesPerLevel: []kueue.TopologyAssignmentSliceLevelValues{
-												{Universal: ptr.To("zone-1")},
+												{Universal: new("zone-1")},
 												{Individual: &kueue.TopologyAssignmentSliceLevelIndividualValues{
 													Roots: []string{"node-1"},
 												}},
@@ -2879,7 +3175,7 @@ func TestUsedNodes(t *testing.T) {
 										{
 											DomainCount: 2,
 											ValuesPerLevel: []kueue.TopologyAssignmentSliceLevelValues{
-												{Universal: ptr.To("zone-1")},
+												{Universal: new("zone-1")},
 												{Individual: &kueue.TopologyAssignmentSliceLevelIndividualValues{
 													Roots: []string{"node-1", "node-2"},
 												}},
@@ -2910,7 +3206,7 @@ func TestUsedNodes(t *testing.T) {
 										{
 											DomainCount: 1,
 											ValuesPerLevel: []kueue.TopologyAssignmentSliceLevelValues{
-												{Universal: ptr.To("zone-1")},
+												{Universal: new("zone-1")},
 												{Individual: &kueue.TopologyAssignmentSliceLevelIndividualValues{
 													Roots: []string{"node-1"},
 												}},
@@ -2929,7 +3225,7 @@ func TestUsedNodes(t *testing.T) {
 										{
 											DomainCount: 2,
 											ValuesPerLevel: []kueue.TopologyAssignmentSliceLevelValues{
-												{Universal: ptr.To("zone-1")},
+												{Universal: new("zone-1")},
 												{Individual: &kueue.TopologyAssignmentSliceLevelIndividualValues{
 													Roots: []string{"node-1", "node-2"},
 												}},
@@ -2960,7 +3256,7 @@ func TestUsedNodes(t *testing.T) {
 										{
 											DomainCount: 1,
 											ValuesPerLevel: []kueue.TopologyAssignmentSliceLevelValues{
-												{Universal: ptr.To("zone-1")},
+												{Universal: new("zone-1")},
 												{Individual: &kueue.TopologyAssignmentSliceLevelIndividualValues{
 													Roots: []string{"node-1"},
 												}},
@@ -2994,8 +3290,8 @@ func TestUsedNodes(t *testing.T) {
 										{
 											DomainCount: 1,
 											ValuesPerLevel: []kueue.TopologyAssignmentSliceLevelValues{
-												{Universal: ptr.To("zone-1")},
-												{Universal: ptr.To("rack-1")},
+												{Universal: new("zone-1")},
+												{Universal: new("rack-1")},
 											},
 											PodCounts: kueue.TopologyAssignmentSlicePodCounts{
 												Universal: ptr.To[int32](1),

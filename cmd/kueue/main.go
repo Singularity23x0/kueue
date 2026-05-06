@@ -61,6 +61,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/controller/admissionchecks/multikueue"
 	"sigs.k8s.io/kueue/pkg/controller/admissionchecks/multikueue/externalframeworks"
 	"sigs.k8s.io/kueue/pkg/controller/admissionchecks/provisioning"
+	"sigs.k8s.io/kueue/pkg/controller/concurrentadmission"
 	"sigs.k8s.io/kueue/pkg/controller/core"
 	"sigs.k8s.io/kueue/pkg/controller/core/indexer"
 	"sigs.k8s.io/kueue/pkg/controller/elasticjobs"
@@ -168,6 +169,12 @@ func main() {
 			setupLog.Error(err, "Unable to set flag gates for known features")
 			os.Exit(1)
 		}
+	}
+
+	// Validates the configuration after it has been loaded and feature gates have been set.
+	if err := config.Validate(&cfg, scheme).ToAggregate(); err != nil {
+		setupLog.Error(err, "Unable to validate the configuration")
+		os.Exit(1)
 	}
 
 	setupLog.Info("Initializing", "gitVersion", version.GitVersion, "gitCommit", version.GitCommit, "buildDate", version.BuildDate)
@@ -503,6 +510,12 @@ func setupControllers(ctx context.Context, mgr ctrl.Manager, cCache *schdcache.C
 		}
 	}
 
+	if features.Enabled(features.ConcurrentAdmission) {
+		if failedCtrl, err := concurrentadmission.SetupControllers(mgr, queues, cfg, roleTracker); err != nil {
+			return fmt.Errorf("could not setup ConcurrentAdmission controller %s: %w", failedCtrl, err)
+		}
+	}
+
 	opts := []jobframework.Option{
 		jobframework.WithManageJobsWithoutQueueName(cfg.ManageJobsWithoutQueueName),
 		jobframework.WithWaitForPodsReady(cfg.WaitForPodsReady),
@@ -570,6 +583,7 @@ func setupScheduler(mgr ctrl.Manager, cCache *schdcache.Cache, queues *qcache.Ma
 		scheduler.WithPodsReadyRequeuingTimestamp(podsReadyRequeuingTimestamp(cfg)),
 		scheduler.WithFairSharing(cfg.FairSharing),
 		scheduler.WithAdmissionFairSharing(cfg.AdmissionFairSharing),
+		scheduler.WithQuotaCheckStrategy(quotaCheckStrategy(cfg)),
 		scheduler.WithRoleTracker(roleTracker),
 		scheduler.WithPreemptionExpectations(preemptionExpectations),
 		scheduler.WithCustomLabels(customLabels),
@@ -624,6 +638,13 @@ func podsReadyRequeuingTimestamp(cfg *configapi.Configuration) configapi.Requeui
 	return configapi.EvictionTimestamp
 }
 
+func quotaCheckStrategy(cfg *configapi.Configuration) configapi.QuotaCheckStrategy {
+	if features.Enabled(features.QuotaCheckStrategy) && cfg.Resources != nil && cfg.Resources.QuotaCheckStrategy != nil {
+		return *cfg.Resources.QuotaCheckStrategy
+	}
+	return configapi.QuotaCheckBlockUndeclared
+}
+
 func apply(configFile string) (ctrl.Options, configapi.Configuration, error) {
 	options, cfg, err := config.Load(scheme, configFile)
 	if err != nil {
@@ -633,6 +654,6 @@ func apply(configFile string) (ctrl.Options, configapi.Configuration, error) {
 	if err != nil {
 		return options, cfg, err
 	}
-	setupLog.Info("Successfully loaded configuration", "config", cfgStr)
+	setupLog.Info("Configuration loaded", "config", cfgStr)
 	return options, cfg, nil
 }

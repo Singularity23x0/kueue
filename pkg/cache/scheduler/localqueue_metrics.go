@@ -14,23 +14,30 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package admissiongates
+package scheduler
 
-import "strings"
+import (
+	"github.com/go-logr/logr"
 
-// Parsers a string containing comma-separated AdmissionGate names and removes
-// leading and trailing spaces around Gate names
-func Parse(s string) []string {
-	if strings.TrimSpace(s) == "" {
-		return []string{}
+	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	"sigs.k8s.io/kueue/pkg/util/queue"
+)
+
+func (c *Cache) RecordLocalQueueResourceMetrics(log logr.Logger, cqName kueue.ClusterQueueReference, lqKey queue.LocalQueueReference) {
+	log.V(4).Info("Recording resource metrics for LocalQueue")
+
+	c.RLock()
+	defer c.RUnlock()
+
+	cq := c.hm.ClusterQueue(cqName)
+	if cq == nil {
+		return
 	}
-	parts := strings.Split(s, ",")
-	for i := range parts {
-		parts[i] = strings.TrimSpace(parts[i])
-	}
-	return parts
-}
 
-func Serialize(gates []string) string {
-	return strings.Join(gates, ",")
+	lq, ok := cq.localQueues[lqKey]
+	if !ok {
+		return
+	}
+
+	lq.reportResourceMetrics(cq.resourceNode.Quotas, c.roleTracker)
 }

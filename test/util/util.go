@@ -485,6 +485,25 @@ func ExpectWorkloadsToBePendingByKeys(ctx context.Context, k8sClient client.Clie
 	}, Timeout, Interval).Should(gomega.Succeed(), AssertMsg("Unexpected workloads are pending", wlObjects...))
 }
 
+func ExpectWorkloadsToBeInadmissibleByKeys(ctx context.Context, k8sClient client.Client, wlKeys ...client.ObjectKey) {
+	ginkgo.GinkgoHelper()
+	wlKeys = uniqueKeys(wlKeys)
+	wlObjects := make([]*kueue.Workload, len(wlKeys))
+	gomega.Eventually(func(g gomega.Gomega) {
+		inadmissible := make([]client.ObjectKey, 0, len(wlKeys))
+		for i, wlKey := range wlKeys {
+			wl := &kueue.Workload{}
+			g.Expect(k8sClient.Get(ctx, wlKey, wl)).To(gomega.Succeed())
+			cond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)
+			if cond != nil && cond.Status == metav1.ConditionFalse && cond.Reason == "Inadmissible" {
+				inadmissible = append(inadmissible, wlKey)
+			}
+			wlObjects[i] = wl
+		}
+		g.Expect(inadmissible).Should(gomega.Equal(wlKeys))
+	}, MediumTimeout, Interval).Should(gomega.Succeed(), AssertMsg("Unexpected workloads are inadmissible", wlObjects...))
+}
+
 func getWorkloadsByWlKeys(ctx context.Context, g gomega.Gomega, k8sClient client.Client, wlKeys []client.ObjectKey) (workloads []*kueue.Workload) {
 	ginkgo.GinkgoHelper()
 	workloads = make([]*kueue.Workload, len(wlKeys))
@@ -1073,7 +1092,7 @@ func ExpectJobUnsuspended(ctx context.Context, c client.Client, key types.Namesp
 	job := &batchv1.Job{}
 	gomega.Eventually(func(g gomega.Gomega) {
 		g.Expect(c.Get(ctx, key, job)).To(gomega.Succeed())
-		g.Expect(job.Spec.Suspend).Should(gomega.Equal(ptr.To(false)))
+		g.Expect(job.Spec.Suspend).Should(gomega.Equal(new(false)))
 	}, MediumTimeout, Interval).Should(gomega.Succeed(), AssertMsg("Job was not unsuspended", job))
 }
 
@@ -1261,7 +1280,7 @@ func DeactivateWorkload(ctx context.Context, c client.Client, key client.ObjectK
 	wl := &kueue.Workload{}
 	gomega.Eventually(func(g gomega.Gomega) {
 		g.Expect(c.Get(ctx, key, wl)).To(gomega.Succeed())
-		wl.Spec.Active = ptr.To(false)
+		wl.Spec.Active = new(false)
 		g.Expect(c.Update(ctx, wl)).To(gomega.Succeed())
 	}, Timeout, Interval).Should(gomega.Succeed(), AssertMsg("Failed to deactivate workload", wl))
 }

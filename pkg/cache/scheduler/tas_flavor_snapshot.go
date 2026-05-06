@@ -634,7 +634,7 @@ func (s *TASFlavorSnapshot) findReplacementAssignment(
 		for i := len(constraints) - 1; i >= 0; i-- {
 			if tr.Count%constraints[i].Size == 0 {
 				effectiveSliceSize = constraints[i].Size
-				effectiveSliceTopology = ptr.To(constraints[i].Topology)
+				effectiveSliceTopology = new(constraints[i].Topology)
 				break
 			}
 		}
@@ -642,7 +642,7 @@ func (s *TASFlavorSnapshot) findReplacementAssignment(
 		// PodSetSliceSize is only read when PodSetSliceRequiredTopology is also set,
 		// so both must be configured for the slice grouping to take effect.
 		trCopy.PodSet.TopologyRequest.PodSetSliceRequiredTopology = effectiveSliceTopology
-		trCopy.PodSet.TopologyRequest.PodSetSliceSize = ptr.To(effectiveSliceSize)
+		trCopy.PodSet.TopologyRequest.PodSetSliceSize = new(effectiveSliceSize)
 	}
 	replacementAssignment, reason := s.findTopologyAssignment(trCopy, nil, assumedUsage, false, requiredReplacementDomain)
 	if reason != "" {
@@ -821,7 +821,7 @@ func (s *TASFlavorSnapshot) findTopologyAssignment(
 	requirements.requests.Add(resources.Requests{corev1.ResourcePods: 1})
 
 	if leaderTasPodSetRequests != nil {
-		requirements.leaderRequests = ptr.To(leaderTasPodSetRequests.SinglePodRequests.Clone())
+		requirements.leaderRequests = new(leaderTasPodSetRequests.SinglePodRequests.Clone())
 		requirements.leaderRequests.Add(resources.Requests{corev1.ResourcePods: 1})
 		state.leaderCount = 1
 	}
@@ -1114,7 +1114,7 @@ func (s *TASFlavorSnapshot) levelKeyWithImpliedFallback(tasRequests *TASPodSetRe
 		return key
 	}
 	if tasRequests.Implied {
-		return ptr.To(s.lowestLevel())
+		return new(s.lowestLevel())
 	}
 	return nil
 }
@@ -1129,9 +1129,9 @@ func (s *TASFlavorSnapshot) levelKey(topologyRequest *kueue.PodSetTopologyReques
 	case topologyRequest.Preferred != nil:
 		return topologyRequest.Preferred
 	case isSliceTopologyOnlyRequest(topologyRequest):
-		return ptr.To(s.highestLevel())
+		return new(s.highestLevel())
 	case ptr.Deref(topologyRequest.Unconstrained, false):
-		return ptr.To(s.lowestLevel())
+		return new(s.lowestLevel())
 	default:
 		return nil
 	}
@@ -1642,7 +1642,7 @@ func (s *TASFlavorSnapshot) fillInCounts(requirements *topologyAssignmentPodRequ
 		leaf.stateWithLeader = requirements.requests.CountIn(remainingCapacity)
 	}
 	for _, root := range s.roots {
-		s.fillInCountsHelper(root, state.sliceSize, state.sliceLevelIdx, 0, state.sliceSizeAtLevel)
+		s.fillInCountsHelper(root, state.sliceSize, state.sliceLevelIdx, 0, state.sliceSizeAtLevel, state.leaderCount > 0)
 	}
 }
 
@@ -1655,7 +1655,7 @@ func belongsToRequiredDomain(leaf *leafDomain, requiredReplacementDomain utiltas
 	return strings.HasPrefix(string(utiltas.DomainID(leaf.levelValues)), string(requiredReplacementDomain))
 }
 
-func (s *TASFlavorSnapshot) fillInCountsHelper(domain *domain, sliceSize int32, sliceLevelIdx int, level int, sliceSizeAtLevel map[int]int32) {
+func (s *TASFlavorSnapshot) fillInCountsHelper(domain *domain, sliceSize int32, sliceLevelIdx int, level int, sliceSizeAtLevel map[int]int32, leaderRequired bool) {
 	// logic for a leaf
 	if len(domain.children) == 0 {
 		if level == sliceLevelIdx {
@@ -1668,7 +1668,7 @@ func (s *TASFlavorSnapshot) fillInCountsHelper(domain *domain, sliceSize int32, 
 	// logic for a parent
 	childrenCapacity := int32(0)
 	sliceCapacity := int32(0)
-
+	hasWithLeaderCapacityContributor := false
 	minStateWithLeaderDifference := int32(math.MaxInt32)
 	minSliceStateWithLeaderDifference := int32(math.MaxInt32)
 	leaderState := int32(0)
@@ -1681,7 +1681,7 @@ func (s *TASFlavorSnapshot) fillInCountsHelper(domain *domain, sliceSize int32, 
 	innerSize, hasInnerConstraint := sliceSizeAtLevel[childLevel]
 
 	for _, child := range domain.children {
-		s.fillInCountsHelper(child, sliceSize, sliceLevelIdx, childLevel, sliceSizeAtLevel)
+		s.fillInCountsHelper(child, sliceSize, sliceLevelIdx, childLevel, sliceSizeAtLevel, leaderRequired)
 
 		childState := child.state
 		childStateWithLeader := child.stateWithLeader
@@ -1692,14 +1692,22 @@ func (s *TASFlavorSnapshot) fillInCountsHelper(domain *domain, sliceSize int32, 
 
 		childrenCapacity += childState
 		sliceCapacity += child.sliceState
-		minStateWithLeaderDifference = min(childState-childStateWithLeader, minStateWithLeaderDifference)
-		minSliceStateWithLeaderDifference = min(child.sliceState-child.sliceStateWithLeader, minSliceStateWithLeaderDifference)
+		if !leaderRequired || child.leaderState > 0 {
+			hasWithLeaderCapacityContributor = true
+			minStateWithLeaderDifference = min(childState-childStateWithLeader, minStateWithLeaderDifference)
+			minSliceStateWithLeaderDifference = min(child.sliceState-child.sliceStateWithLeader, minSliceStateWithLeaderDifference)
+		}
 		leaderState = max(child.leaderState, leaderState)
 	}
 	domain.state = childrenCapacity
-	domain.stateWithLeader = childrenCapacity - minStateWithLeaderDifference
+	sliceStateWithLeader := int32(0)
+	if hasWithLeaderCapacityContributor {
+		domain.stateWithLeader = childrenCapacity - minStateWithLeaderDifference
+		sliceStateWithLeader = sliceCapacity - minSliceStateWithLeaderDifference
+	} else {
+		domain.stateWithLeader = 0
+	}
 	domain.leaderState = leaderState
-	sliceStateWithLeader := sliceCapacity - minSliceStateWithLeaderDifference
 
 	if level == sliceLevelIdx {
 		// initialize the sliceState for the requested slice level.

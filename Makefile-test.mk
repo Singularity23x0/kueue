@@ -132,7 +132,7 @@ test-multikueue-integration: compile-crd-manifests envtest ginkgo dep-crds ginkg
 	$(BIN_DIR)/ginkgo-top -i $(ARTIFACTS)/multikueue-integration.json > $(ARTIFACTS)/multikueue-integration-top.yaml
 
 ## Label Taxonomy:
-##   Features: appwrapper,certs,deployment,job,fairsharing,jaxjob,jobset,kuberay,kueuectl,leaderworkerset,metrics,pod,pytorchjob,statefulset,tas,trainjob,visibility,e2e_v1beta1
+##   Features: appwrapper,certs,deployment,job,fairsharing,jaxjob,jobset,kuberay,kueuectl,leaderworkerset,metrics,pod,pytorchjob,statefulset,tas,trainjob,visibility,e2e_v1beta1,ha
 ##
 ## Examples:
 ##   Run only AppWrapper tests: GINKGO_ARGS="--label-filter=feature:appwrapper" make test-e2e
@@ -167,13 +167,6 @@ test-tas-e2e: setup-e2e-env kind-ray-project-mini-image-build run-test-tas-e2e-$
 .PHONY: test-tas-e2e-helm
 test-tas-e2e-helm: E2E_USE_HELM=true
 test-tas-e2e-helm: test-tas-e2e
-
-
-.PHONY: test-e2e-customconfigs
-test-e2e-customconfigs: test-e2e-sequential-baseline test-e2e-sequential-extended
-
-.PHONY: test-e2e-customconfigs-helm
-test-e2e-customconfigs-helm: test-e2e-sequential-baseline-helm test-e2e-sequential-extended-helm
 
 .PHONY: test-e2e-certmanager
 test-e2e-certmanager: setup-e2e-env run-test-e2e-certmanager-$(E2E_KIND_VERSION:kindest/node:v%=%)

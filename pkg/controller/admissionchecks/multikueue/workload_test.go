@@ -162,7 +162,7 @@ func TestWlReconcile(t *testing.T) {
 			},
 			worker1Jobs: []batchv1.Job{
 				*baseJobBuilder.Clone().
-					Label(constants.PrebuiltWorkloadLabel, "wl1").
+					PrebuiltWorkloadLabel("wl1").
 					Label(kueue.MultiKueueOriginLabel, defaultOrigin).
 					Obj(),
 			},
@@ -471,7 +471,7 @@ func TestWlReconcile(t *testing.T) {
 			},
 			wantWorker1Jobs: []batchv1.Job{
 				*baseJobBuilder.Clone().
-					Label(constants.PrebuiltWorkloadLabel, "wl1").
+					PrebuiltWorkloadLabel("wl1").
 					Label(kueue.MultiKueueOriginLabel, defaultOrigin).
 					Obj(),
 			},
@@ -504,7 +504,7 @@ func TestWlReconcile(t *testing.T) {
 			},
 			worker1Jobs: []batchv1.Job{
 				*baseJobBuilder.Clone().
-					Label(constants.PrebuiltWorkloadLabel, "wl1").
+					PrebuiltWorkloadLabel("wl1").
 					Label(kueue.MultiKueueOriginLabel, defaultOrigin).
 					Active(0).
 					Obj(),
@@ -555,7 +555,7 @@ func TestWlReconcile(t *testing.T) {
 			},
 			wantWorker1Jobs: []batchv1.Job{
 				*baseJobBuilder.Clone().
-					Label(constants.PrebuiltWorkloadLabel, "wl1").
+					PrebuiltWorkloadLabel("wl1").
 					Label(kueue.MultiKueueOriginLabel, defaultOrigin).
 					Obj(),
 			},
@@ -582,7 +582,7 @@ func TestWlReconcile(t *testing.T) {
 			},
 			worker1Jobs: []batchv1.Job{
 				*baseJobBuilder.Clone().
-					Label(constants.PrebuiltWorkloadLabel, "wl1").
+					PrebuiltWorkloadLabel("wl1").
 					Label(kueue.MultiKueueOriginLabel, defaultOrigin).
 					Active(1).
 					Obj(),
@@ -633,7 +633,7 @@ func TestWlReconcile(t *testing.T) {
 			},
 			wantWorker1Jobs: []batchv1.Job{
 				*baseJobBuilder.Clone().
-					Label(constants.PrebuiltWorkloadLabel, "wl1").
+					PrebuiltWorkloadLabel("wl1").
 					Label(kueue.MultiKueueOriginLabel, defaultOrigin).
 					Active(1).
 					Obj(),
@@ -670,7 +670,7 @@ func TestWlReconcile(t *testing.T) {
 
 			worker1Jobs: []batchv1.Job{
 				*baseJobBuilder.Clone().
-					Label(constants.PrebuiltWorkloadLabel, "wl1").
+					PrebuiltWorkloadLabel("wl1").
 					Condition(batchv1.JobCondition{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}).
 					Obj(),
 			},
@@ -709,7 +709,7 @@ func TestWlReconcile(t *testing.T) {
 			},
 			wantWorker1Jobs: []batchv1.Job{
 				*baseJobBuilder.Clone().
-					Label(constants.PrebuiltWorkloadLabel, "wl1").
+					PrebuiltWorkloadLabel("wl1").
 					Condition(batchv1.JobCondition{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}).
 					Obj(),
 			},
@@ -737,7 +737,7 @@ func TestWlReconcile(t *testing.T) {
 
 			worker1Jobs: []batchv1.Job{
 				*baseJobBuilder.Clone().
-					Label(constants.PrebuiltWorkloadLabel, "wl1").
+					PrebuiltWorkloadLabel("wl1").
 					Condition(batchv1.JobCondition{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}).
 					Obj(),
 			},
@@ -857,7 +857,7 @@ func TestWlReconcile(t *testing.T) {
 			},
 			worker1Jobs: []batchv1.Job{
 				*baseJobBuilder.Clone().
-					Label(constants.PrebuiltWorkloadLabel, "wl1").
+					PrebuiltWorkloadLabel("wl1").
 					Obj(),
 			},
 		},
@@ -895,7 +895,7 @@ func TestWlReconcile(t *testing.T) {
 			},
 			worker1Jobs: []batchv1.Job{
 				*baseJobBuilder.Clone().
-					Label(constants.PrebuiltWorkloadLabel, "wl1").
+					PrebuiltWorkloadLabel("wl1").
 					Obj(),
 			},
 			useSecondWorker: true,
@@ -929,7 +929,7 @@ func TestWlReconcile(t *testing.T) {
 			},
 			wantWorker1Jobs: []batchv1.Job{
 				*baseJobBuilder.Clone().
-					Label(constants.PrebuiltWorkloadLabel, "wl1").
+					PrebuiltWorkloadLabel("wl1").
 					Obj(),
 			},
 		},
@@ -961,7 +961,7 @@ func TestWlReconcile(t *testing.T) {
 			},
 			worker1Jobs: []batchv1.Job{
 				*baseJobBuilder.Clone().
-					Label(constants.PrebuiltWorkloadLabel, "wl1").
+					PrebuiltWorkloadLabel("wl1").
 					Obj(),
 			},
 			useSecondWorker: true,
@@ -1013,7 +1013,7 @@ func TestWlReconcile(t *testing.T) {
 			},
 			worker1Jobs: []batchv1.Job{
 				*baseJobBuilder.Clone().
-					Label(constants.PrebuiltWorkloadLabel, "wl1").
+					PrebuiltWorkloadLabel("wl1").
 					Obj(),
 			},
 			useSecondWorker: true,
@@ -1042,7 +1042,7 @@ func TestWlReconcile(t *testing.T) {
 			},
 			wantWorker1Jobs: []batchv1.Job{
 				*baseJobBuilder.Clone().
-					Label(constants.PrebuiltWorkloadLabel, "wl1").
+					PrebuiltWorkloadLabel("wl1").
 					Obj(),
 			},
 		},
@@ -1078,7 +1078,7 @@ func TestWlReconcile(t *testing.T) {
 			},
 			worker1Jobs: []batchv1.Job{
 				*baseJobBuilder.Clone().
-					Label(constants.PrebuiltWorkloadLabel, "wl1").
+					PrebuiltWorkloadLabel("wl1").
 					Obj(),
 			},
 			useSecondWorker: true,
@@ -1815,28 +1815,6 @@ func TestNominateAndSynchronizeWorkers_MoreCases(t *testing.T) {
 	}
 }
 
-// mockQueue implements workqueue.TypedRateLimitingInterface for testing
-type mockQueue struct {
-	addedItems []reconcile.Request
-}
-
-func (m *mockQueue) Add(item reconcile.Request) {
-	m.addedItems = append(m.addedItems, item)
-}
-
-func (m *mockQueue) Len() int                          { return 0 }
-func (m *mockQueue) Get() (reconcile.Request, bool)    { return reconcile.Request{}, false }
-func (m *mockQueue) Done(reconcile.Request)            {}
-func (m *mockQueue) Forget(reconcile.Request)          {}
-func (m *mockQueue) NumRequeues(reconcile.Request) int { return 0 }
-func (m *mockQueue) AddRateLimited(reconcile.Request)  {}
-func (m *mockQueue) AddAfter(item reconcile.Request, duration time.Duration) {
-	m.addedItems = append(m.addedItems, item)
-}
-func (m *mockQueue) ShutDown()          {}
-func (m *mockQueue) ShutDownWithDrain() {}
-func (m *mockQueue) ShuttingDown() bool { return false }
-
 func TestConfigHandlerUpdate(t *testing.T) {
 	cases := map[string]struct {
 		admissionChecks   []kueue.AdmissionCheck
@@ -1919,7 +1897,7 @@ func TestConfigHandlerUpdate(t *testing.T) {
 
 			fakeClient := clientBuilder.Build()
 			handler := &configHandler{client: fakeClient, eventsBatchPeriod: time.Second}
-			mockQ := &mockQueue{}
+			mockQ := &utiltesting.MockTypedRateLimitingInterface{}
 
 			updateEvent := event.UpdateEvent{
 				ObjectOld: tc.oldConfig,
@@ -1929,7 +1907,7 @@ func TestConfigHandlerUpdate(t *testing.T) {
 			handler.Update(ctx, updateEvent, mockQ)
 
 			var actualQueuedWLs []string
-			for _, req := range mockQ.addedItems {
+			for _, req := range mockQ.Items {
 				actualQueuedWLs = append(actualQueuedWLs, req.Name)
 			}
 
@@ -1957,7 +1935,7 @@ func TestConfigHandlerDelete(t *testing.T) {
 	fakeClient := clientBuilder.Build()
 
 	handler := &configHandler{client: fakeClient, eventsBatchPeriod: time.Second}
-	mockQ := &mockQueue{}
+	mockQ := &utiltesting.MockTypedRateLimitingInterface{}
 
 	config := utiltestingapi.MakeMultiKueueConfig("config1").Clusters("cluster1").Obj()
 	deleteEvent := event.DeleteEvent{
@@ -1966,10 +1944,10 @@ func TestConfigHandlerDelete(t *testing.T) {
 
 	handler.Delete(ctx, deleteEvent, mockQ)
 
-	if len(mockQ.addedItems) != 1 {
-		t.Errorf("expected 1 workload to be queued, got %d", len(mockQ.addedItems))
+	if len(mockQ.Items) != 1 {
+		t.Errorf("expected 1 workload to be queued, got %d", len(mockQ.Items))
 	}
-	if mockQ.addedItems[0].Name != "wl1" {
-		t.Errorf("expected workload wl1 to be queued, got %s", mockQ.addedItems[0].Name)
+	if mockQ.Items[0].Name != "wl1" {
+		t.Errorf("expected workload wl1 to be queued, got %s", mockQ.Items[0].Name)
 	}
 }

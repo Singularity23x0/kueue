@@ -28,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
@@ -327,6 +326,9 @@ var _ = ginkgo.Describe("Preemption", func() {
 				evictedWorkloads := util.FilterEvictedWorkloads(ctx, k8sClient, lowPriorityWorkloads...)
 				g.Expect(evictedWorkloads).To(gomega.HaveLen(lowPrioWorkloadCount))
 			}, util.Timeout, util.Interval).Should(gomega.Succeed())
+
+			ginkgo.By("Finishing eviction for preempted workloads")
+			util.FinishEvictionForWorkloads(ctx, k8sClient, lowPriorityWorkloads...)
 		})
 
 		ginkgo.It("Should include job UID in preemption condition when the label is set", func() {
@@ -739,7 +741,7 @@ var _ = ginkgo.Describe("Preemption", func() {
 					ReclaimWithinCohort: kueue.PreemptionPolicyLowerPriority,
 					BorrowWithinCohort: &kueue.BorrowWithinCohort{
 						Policy:               kueue.BorrowWithinCohortPolicyLowerPriority,
-						MaxPriorityThreshold: ptr.To(midPriority),
+						MaxPriorityThreshold: new(midPriority),
 					},
 				}).
 				Obj()
@@ -803,7 +805,7 @@ var _ = ginkgo.Describe("Preemption", func() {
 					ReclaimWithinCohort: kueue.PreemptionPolicyLowerPriority,
 					BorrowWithinCohort: &kueue.BorrowWithinCohort{
 						Policy:               kueue.BorrowWithinCohortPolicyLowerPriority,
-						MaxPriorityThreshold: ptr.To(midPriority),
+						MaxPriorityThreshold: new(midPriority),
 					},
 				}).
 				Obj()
@@ -1022,7 +1024,7 @@ var _ = ginkgo.Describe("Preemption", func() {
 					WithinClusterQueue:  kueue.PreemptionPolicyLowerPriority,
 					BorrowWithinCohort: &kueue.BorrowWithinCohort{
 						Policy:               kueue.BorrowWithinCohortPolicyLowerPriority,
-						MaxPriorityThreshold: ptr.To(veryHighPriority),
+						MaxPriorityThreshold: new(veryHighPriority),
 					},
 				}).
 				Obj()
