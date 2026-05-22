@@ -55,6 +55,39 @@ const (
 	SecretLocationType LocationType = "Secret"
 )
 
+type GlobalStatus string
+
+const (
+  // Success state means the workload has finished successfully.
+  Success GlobalStatus = "Success"
+
+  // Failed state means the workload has finished with the Failed state.
+  Failed GlobalStatus = "Failed"
+
+  // Inactive state means the workload is inactive.
+  Inactive GlobalStatus = "Inactive"
+
+  // Running state means the workload has the "Admitted" condition on the Manager Cluster and was admitted on a specific Worker Cluster.
+  // The underlying job is being executed on said Worker Cluster.
+  Running GlobalStatus = "Running"
+
+  // WorkerSelected state means the workload has the "Admitted" condition on the Manager Cluster but was not admitted on the Worker yet.
+  // A specific Worker was selected, but the workload has only managed to reserve quota there so far.
+  WorkerSelected GlobalStatus = "WorkerSelected"
+
+  // WaitingForWorker state means the workload has received quota on the Manager Cluster.
+  // MultiKueue is currently dispatching remote workloads to eligible Workers.
+  WaitingForWorker GlobalStatus = "WaitingForWorker"
+
+  // WaitingForWorkerNomination state is specific to a non-primary component workload in the multi-workload-resource handling scenario.
+  // It means the component workload has received quota reservation on the Manager
+  // and is waiting for the primary component workload to select a worker to dispatch a remote to.
+  WaitingForWorkerNomination GlobalStatus = "WaitingForWorkerNomination"
+
+  // WaitingForManagerQuota state means the workload is currently in the "Pending" state on the Manager Cluster (does not currently hold any quota reservations).
+  WaitingForManagerQuota GlobalStatus = "WaitingForManagerQuota"
+)
+
 type KubeConfig struct {
 	// location of the KubeConfig.
 	//

@@ -970,6 +970,18 @@ const (
 	// WorkloadDeactivationTarget means that the Workload should be deactivated.
 	// This condition is temporary, so it should be removed after deactivation.
 	WorkloadDeactivationTarget = "DeactivationTarget"
+
+	// MultiKueueWorkload means the workload is a MultiKueue Workload created on a Manager Cluster.
+  // The possible reasons depend on the state of the MK Workload:
+  // - Success,
+  // - Failed,
+  // - Inactive,
+  // - Running,
+  // - WorkerSelected,
+  // - WaitingForWorker,
+  // - WaitingForWorkerNomination,
+  // - WaitingForManagerQuota.
+	MultiKueueWorkload = "MultiKueue"
 )
 
 // Reasons for the WorkloadPreemptionBlocked condition.
