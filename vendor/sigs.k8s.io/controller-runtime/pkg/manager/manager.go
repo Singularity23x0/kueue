@@ -67,6 +67,8 @@ type Manager interface {
 	// election was configured.
 	Elected() <-chan struct{}
 
+	GetLeaderAwareClient() client.Client
+
 	// AddMetricsServerExtraHandler adds an extra handler served on path to the http server that serves metrics.
 	// Might be useful to register some diagnostic endpoints e.g. pprof.
 	//

@@ -248,6 +248,10 @@ func (cm *controllerManager) GetClient() client.Client {
 	return cm.cluster.GetClient()
 }
 
+func (cm *controllerManager) GetLeaderAwareClient() client.Client {
+	return client.NewLeaderAwareClient(cm.cluster.GetClient(), cm.Elected())
+}
+
 func (cm *controllerManager) GetScheme() *runtime.Scheme {
 	return cm.cluster.GetScheme()
 }

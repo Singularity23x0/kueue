@@ -18,6 +18,7 @@ package client
 
 import (
 	"context"
+	"errors"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -128,7 +129,7 @@ type SubResourceClientConstructor interface {
 	// - Scale update:
 	//     dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "foo", Name: "bar"}}
 	//     scale := &autoscalingv1.Scale{Spec: autoscalingv1.ScaleSpec{Replicas: 2}}
-	//     c.SubResource("scale").Update(ctx, dep, client.WithSubResourceBody(scale))
+	//     c.SubResource("scale").Update(ctx, dep, WithSubResourceBody(scale))
 	SubResource(subResource string) SubResourceClient
 }
 
@@ -190,6 +191,131 @@ type WithWatch interface {
 	Client
 	Watch(ctx context.Context, obj ObjectList, opts ...ListOption) (watch.Interface, error)
 }
+
+var (
+	ErrIllegalForFollower = errors.New("Operation illegal when Kueue is running in follower mode")
+)
+
+// Client overriding all write methods to perform operations only when binary is a leader.
+var _ Client = (*leaderAwareClient)(nil)
+
+type leaderAwareClient struct {
+	internal Client
+	elected  <-chan struct{}
+}
+
+func NewLeaderAwareClient(internal Client, elected <-chan struct{}) Client {
+	return &leaderAwareClient{internal: internal, elected: elected}
+}
+
+// Reader
+func (c *leaderAwareClient) Get(ctx context.Context, key ObjectKey, obj Object, opts ...GetOption) error {
+	return c.internal.Get(ctx, key, obj, opts...)
+}
+
+func (c *leaderAwareClient) List(ctx context.Context, list ObjectList, opts ...ListOption) error {
+	return c.internal.List(ctx, list, opts...)
+}
+
+// Writer
+func (c *leaderAwareClient) Create(ctx context.Context, obj Object, opts ...CreateOption) error {
+	return c.onLeader(func() error {
+		return c.internal.Create(ctx, obj, opts...)
+	})
+}
+
+func (c *leaderAwareClient) Delete(ctx context.Context, obj Object, opts ...DeleteOption) error {
+	return c.onLeader(func() error {
+		return c.internal.Delete(ctx, obj, opts...)
+	})
+}
+
+func (c *leaderAwareClient) Update(ctx context.Context, obj Object, opts ...UpdateOption) error {
+	return c.onLeader(func() error {
+		return c.internal.Update(ctx, obj, opts...)
+	})
+}
+
+func (c *leaderAwareClient) Patch(ctx context.Context, obj Object, patch Patch, opts ...PatchOption) error {
+	return c.onLeader(func() error {
+		return c.internal.Patch(ctx, obj, patch, opts...)
+	})
+}
+
+func (c *leaderAwareClient) DeleteAllOf(ctx context.Context, obj Object, opts ...DeleteAllOfOption) error {
+	return c.onLeader(func() error {
+		return c.internal.DeleteAllOf(ctx, obj, opts...)
+	})
+}
+
+func (c *leaderAwareClient) Apply(ctx context.Context, obj runtime.ApplyConfiguration, opts ...ApplyOption) error {
+	return c.onLeader(func() error {
+		return c.internal.Apply(ctx, obj, opts...)
+	})
+}
+
+// StatusClient
+func (c *leaderAwareClient) Status() SubResourceWriter {
+	return c.internal.Status()
+}
+
+// SubResourceClientConstructor
+func (c *leaderAwareClient) SubResource(subResource string) SubResourceClient {
+	return c.internal.SubResource(subResource)
+}
+
+// Other
+func (c *leaderAwareClient) Scheme() *runtime.Scheme {
+	return c.internal.Scheme()
+}
+
+func (c *leaderAwareClient) RESTMapper() meta.RESTMapper {
+	return c.internal.RESTMapper()
+}
+
+func (c *leaderAwareClient) GroupVersionKindFor(obj runtime.Object) (schema.GroupVersionKind, error) {
+	return c.internal.GroupVersionKindFor(obj)
+}
+
+func (c *leaderAwareClient) IsObjectNamespaced(obj runtime.Object) (bool, error) {
+	return c.internal.IsObjectNamespaced(obj)
+}
+
+func (c *leaderAwareClient) onLeader(fn func() error) error {
+	select {
+	case <-c.elected:
+		return fn()
+	default:
+		return ErrIllegalForFollower
+	}
+}
+
+type lightewightLeaderAwareClient struct {
+	Client
+	elected <-chan struct{}
+}
+
+func (c *lightewightLeaderAwareClient) Create(ctx context.Context, obj Object, opts ...CreateOption) error {
+	return c.onLeader(func() error {
+		return c.Client.Create(ctx, obj, opts...)
+	})
+}
+
+func (c *lightewightLeaderAwareClient) Delete(ctx context.Context, obj Object, opts ...DeleteOption) error {
+	return c.onLeader(func() error {
+		return c.Client.Delete(ctx, obj, opts...)
+	})
+}
+
+func (c *lightewightLeaderAwareClient) onLeader(fn func() error) error {
+	select {
+	case <-c.elected:
+		return fn()
+	default:
+		return ErrIllegalForFollower
+	}
+}
+
 
 // IndexerFunc knows how to take an object and turn it into a series
 // of non-namespaced keys. Namespaced objects are automatically given
