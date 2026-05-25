@@ -184,6 +184,7 @@ func (w *wlReconciler) Reconcile(ctx context.Context, req reconcile.Request) (re
 	}
 
 	if mkAc == nil || mkAc.State == kueue.CheckStateRejected {
+		// GlobalStatus::TODO If check rejected - mark as REJECTED
 		log.V(2).Info("Skip Workload", "isDeleted", isDeleted)
 		if isDeleted {
 			// Delete the workload from the cache considering the following case:
@@ -342,6 +343,7 @@ func (w *wlReconciler) reconcileGroup(ctx context.Context, group *wlGroup) (reco
 
 	// 2. Delete all remote workloads when the local workload is finished or has no quota reservation.
 	if group.IsFinished() || !workload.HasQuotaReservation(group.local) {
+		// GlobalStatus::TODO Mark as WAITING_FOR_MANAGER_QUOTA (if not finished)
 		var errs []error
 		for rem := range group.remotes {
 			if err := group.RemoveRemoteObjects(ctx, rem); err != nil {
@@ -368,6 +370,7 @@ func (w *wlReconciler) reconcileGroup(ctx context.Context, group *wlGroup) (reco
 		}
 
 		// finish workload and copy the status to the local one
+		// GlobalStatus::TODO Finish (SUCCESS/FAILED)
 		return reconcile.Result{}, workload.Finish(ctx, w.client, group.local, remoteFinishedCond.Reason, remoteFinishedCond.Message, w.clock)
 	}
 
@@ -500,6 +503,8 @@ func (w *wlReconciler) reconcileGroup(ctx context.Context, group *wlGroup) (reco
 		if err := w.syncReservingRemoteState(ctx, group, reservingRemote, acs); err != nil {
 			return reconcile.Result{}, err
 		}
+
+		// GlobalStatus::TODO Mark as RUNNING
 		return reconcile.Result{RequeueAfter: w.workerLostTimeout}, nil
 	} else if acs.State == kueue.CheckStateReady {
 		// If there is no reserving and the AC is ready, the connection with the reserving remote might
@@ -738,6 +743,7 @@ func (w *wlReconciler) nominateAndSynchronizeWorkers(ctx context.Context, group 
 	isPrimary := isPrimaryComponentWorkload(group.local, group.jobAdapter, componentWorkloads)
 
 	if assignedWorkerCluster != "" {
+		// GlobalStatus::TODO Mark as WAITING_FOR_WORKER - non primary MultiWorkload case
 		log.V(3).Info("Using cluster from component workloads", "cluster", assignedWorkerCluster)
 		if _, ok := group.remotes[assignedWorkerCluster]; ok {
 			if !slices.Contains(group.local.Status.NominatedClusterNames, assignedWorkerCluster) {
@@ -755,9 +761,14 @@ func (w *wlReconciler) nominateAndSynchronizeWorkers(ctx context.Context, group 
 	}
 
 	if !isPrimary {
+		// GlobalStatus::TODO Mark as WAITING_FOR_WORKER_NOMINATION
 		log.V(3).Info("Waiting for primary workload to nominate cluster")
 		return reconcile.Result{}, nil
 	}
+	// else {
+	// 	means is primary MultiWorkload workload or non MultiWorkload workload
+	//  GlobalStatus::TODO Mark as WAITING_FOR_WORKER - default case (primary MW or regular WL)
+	// }
 
 	var nominatedWorkers []string
 
