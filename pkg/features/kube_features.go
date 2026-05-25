@@ -414,6 +414,12 @@ const (
 	// (pod-group-name and prebuilt-workload-name) via annotations. When the gate is
 	// disabled, the label-based identifiers are used instead.
 	WorkloadIdentifierAnnotations featuregate.Feature = "WorkloadIdentifierAnnotations"
+
+	// owner: @dpastuszka
+	// issue: https://github.com/kubernetes-sigs/kueue/issues/10189
+	//
+	// Enable the global status condition calculation and populating in MultiKueue Workloads.
+	MultiKueueGlobalStatusCondition featuregate.Feature = "MultiKueueGlobalStatusCondition"
 )
 
 func init() {
@@ -645,6 +651,9 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 	},
 	WorkloadIdentifierAnnotations: {
 		{Version: version.MustParse("0.18"), Default: true, PreRelease: featuregate.Beta},
+	},
+	MultiKueueGlobalStatusCondition: {
+		{Version: version.MustParse("0.19"), Default: false, PreRelease: featuregate.Alpha},
 	},
 }
 
