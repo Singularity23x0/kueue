@@ -972,15 +972,6 @@ const (
 	WorkloadDeactivationTarget = "DeactivationTarget"
 
 	// MultiKueueWorkload means the workload is a MultiKueue Workload created on a Manager Cluster.
-  // The possible reasons depend on the state of the MK Workload:
-  // - Success,
-  // - Failed,
-  // - Inactive,
-  // - Running,
-  // - WorkerSelected,
-  // - WaitingForWorker,
-  // - WaitingForWorkerNomination,
-  // - WaitingForManagerQuota.
 	MultiKueueWorkload = "MultiKueue"
 )
 

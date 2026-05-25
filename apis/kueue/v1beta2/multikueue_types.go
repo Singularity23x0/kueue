@@ -64,16 +64,12 @@ const (
   // Failed state means the workload has finished with the Failed state.
   Failed GlobalStatus = "Failed"
 
-  // Inactive state means the workload is inactive.
-  Inactive GlobalStatus = "Inactive"
+  // Rejected state means the workload was rejected by the MK Admission Check.
+  Rejected GlobalStatus = "Rejected"
 
-  // Running state means the workload has the "Admitted" condition on the Manager Cluster and was admitted on a specific Worker Cluster.
+  // AdmittedOnWorker state means the workload has the "Admitted" condition on the Manager Cluster and was admitted on a specific Worker Cluster.
   // The underlying job is being executed on said Worker Cluster.
-  Running GlobalStatus = "Running"
-
-  // WorkerSelected state means the workload has the "Admitted" condition on the Manager Cluster but was not admitted on the Worker yet.
-  // A specific Worker was selected, but the workload has only managed to reserve quota there so far.
-  WorkerSelected GlobalStatus = "WorkerSelected"
+  AdmittedOnWorker GlobalStatus = "AdmittedOnWorker"
 
   // WaitingForWorker state means the workload has received quota on the Manager Cluster.
   // MultiKueue is currently dispatching remote workloads to eligible Workers.
