@@ -157,19 +157,18 @@ func NewClusterQueueReconciler(
 }
 
 func (r *ClusterQueueReconciler) updateSpec(ctx context.Context, cq *kueue.ClusterQueue, cache *QuotaCache) (bool, error) {
-	cqRef := kueue.ClusterQueueReference(cq.Name)
-	if equality.Semantic.DeepEqual(cache.spec[cqRef], cq.Spec.ResourceGroups) {
+	if equality.Semantic.DeepEqual(cache.spec, cq.Spec.ResourceGroups) {
 		return false, nil
 	}
-	cache.spec[cqRef] = cq.Spec.ResourceGroups
+	cache.spec = cq.Spec.ResourceGroups
 	return true, nil
 }
 
 func (r *ClusterQueueReconciler) updateEffectiveResourceGroups(ctx context.Context, cq *kueue.ClusterQueue, cache *QuotaCache) (bool, error) {
-	cqRef := kueue.ClusterQueueReference(cq.Name)
-	effectiveQuota := cache.spec[cqRef]
-	if mkQuota, found := cache.mkAggregatedQuota[cqRef]; found {
-		effectiveQuota = []kueue.ResourceGroup{mkQuota}
+	effectiveQuota := cache.spec
+	mkQuota := cache.mkAggregatedQuota
+	if mkQuota != nil {
+		effectiveQuota = []kueue.ResourceGroup{*mkQuota}
 	}
 	if equality.Semantic.DeepEqual(cq.Status.EffectiveResourceGroups, effectiveQuota) {
 		return false, nil

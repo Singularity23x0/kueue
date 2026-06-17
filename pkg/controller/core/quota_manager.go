@@ -34,17 +34,11 @@ const (
 // An error always ends the chain and is returned immediately to the calling QuotaUpdateTrigger.
 type QuotaUpdateStep = func(ctx context.Context, cq *kueue.ClusterQueue, cache *QuotaCache) (cont bool, err error)
 
-// QuotaUpdateTrigger allows to start an update chain from a specific QuotaUpdateStep.
-// The execution will proceed until:
-//   - we execute all remaining steps, OR
-//   - a step returns cont=false or err != nil.
-type QuotaUpdateTrigger = func(ctx context.Context, cq *kueue.ClusterQueue) error
-
 // QuotaManager is a central place for managing updates of quota related information.
 // It executes the chain of registered QuotaUpdateSteps and allows to start the chain from any step via a dedicated QuotaUpdateTrigger.
 type QuotaManager struct {
 	sync.RWMutex
-	cache          *QuotaCache
+	cache          map[kueue.ClusterQueueReference]*QuotaCache
 	updateRegistry map[string]int
 	updateChain    []QuotaUpdateStep
 }
@@ -52,9 +46,9 @@ type QuotaManager struct {
 // QuotaCache is the internal cache of the QuotaManager.
 // It is used by QuotaUpdateSteps to pass partial quota calculation results to following steps.
 type QuotaCache struct {
-	spec              map[kueue.ClusterQueueReference][]kueue.ResourceGroup
-	mkAggregatedQuota map[kueue.ClusterQueueReference]kueue.ResourceGroup
-	effectiveQuota    map[kueue.ClusterQueueReference][]kueue.ResourceGroup
+	spec              []kueue.ResourceGroup
+	mkAggregatedQuota *kueue.ResourceGroup
+	effectiveQuota    []kueue.ResourceGroup
 }
 
 // QuotaManagerOpts houses references to reconcilers that provide the QuotaUpdateStep functions and invoke their QuotaUpdateTriggers.
@@ -66,11 +60,9 @@ type QuotaManagerOpts struct {
 // NewQuotaManager creates a QuotaManager with update setps configured based on active features using reconcilers provided in opts.
 func NewQuotaManager() *QuotaManager {
 	qm := &QuotaManager{
-		cache: &QuotaCache{
-			spec:              nil,
-			mkAggregatedQuota: nil,
-		},
-		updateChain: make([]QuotaUpdateStep, 0),
+		cache:          make(map[kueue.ClusterQueueReference]*QuotaCache),
+		updateRegistry: make(map[string]int),
+		updateChain:    make([]QuotaUpdateStep, 0),
 	}
 	return qm
 }
@@ -91,8 +83,16 @@ func (qm *QuotaManager) UpdateQuota(startStepAlias string, ctx context.Context, 
 func (qm *QuotaManager) triggerChain(startIdx int, ctx context.Context, cq *kueue.ClusterQueue) error {
 	qm.Lock()
 	defer qm.Unlock()
+
+	cqRef := kueue.ClusterQueueReference(cq.Name)
+	cache, ok := qm.cache[cqRef]
+	if !ok {
+		cache = &QuotaCache{}
+		qm.cache[cqRef] = cache
+	}
+
 	for _, update := range qm.updateChain[startIdx:] {
-		if cont, err := update(ctx, cq, qm.cache); err != nil {
+		if cont, err := update(ctx, cq, cache); err != nil {
 			return err
 		} else if !cont {
 			return nil
