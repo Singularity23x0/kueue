@@ -468,7 +468,7 @@ func TestCQReconcile(t *testing.T) {
 			}
 
 			helper, _ := admissioncheck.NewMultiKueueStoreHelper(c)
-			reconciler := newCQReconciler(c, helper, cRec, nil, 100*time.Millisecond)
+			reconciler := newCQReconciler(c, helper, cRec, nil, nil, 100*time.Millisecond)
 
 			_, gotErr := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: tc.cq.Name}})
 			if gotErr != nil {

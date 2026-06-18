@@ -63,7 +63,6 @@ type ClusterQueueReconciler struct {
 	client                client.Client
 	logName               string
 	qManager              *qcache.Manager
-	quotaManager          *QuotaManager
 	cache                 *schdcache.Cache
 	nonCQObjectUpdateCh   chan event.TypedGenericEvent[iter.Seq[kueue.ClusterQueueReference]]
 	watchers              []ClusterQueueUpdateWatcher
@@ -84,7 +83,6 @@ type ClusterQueueReconcilerOptions struct {
 	clock                 clock.Clock
 	roleTracker           *roletracker.RoleTracker
 	customLabels          *metrics.CustomLabels
-	qm                    *QuotaManager
 }
 
 // ClusterQueueReconcilerOption configures the reconciler.
@@ -120,12 +118,6 @@ func WithClusterQueueCustomLabels(customLabels *metrics.CustomLabels) ClusterQue
 	}
 }
 
-func WithQuotaManager(qm *QuotaManager) ClusterQueueReconcilerOption {
-	return func(o *ClusterQueueReconcilerOptions) {
-		o.qm = qm
-	}
-}
-
 var defaultCQOptions = ClusterQueueReconcilerOptions{
 	clock: realClock,
 }
@@ -152,30 +144,29 @@ func NewClusterQueueReconciler(
 		clock:                 options.clock,
 		roleTracker:           options.roleTracker,
 		customLabels:          options.customLabels,
-		quotaManager:          options.qm,
 	}
 }
 
-func (r *ClusterQueueReconciler) updateSpec(ctx context.Context, cq *kueue.ClusterQueue, cache *QuotaCache) (bool, error) {
-	if equality.Semantic.DeepEqual(cache.spec, cq.Spec.ResourceGroups) {
-		return false, nil
-	}
-	cache.spec = cq.Spec.ResourceGroups
-	return true, nil
-}
+// func (r *ClusterQueueReconciler) updateSpec(ctx context.Context, cq *kueue.ClusterQueue, cache *queue.QuotaCache) (bool, error) {
+// 	if equality.Semantic.DeepEqual(cache.spec, cq.Spec.ResourceGroups) {
+// 		return false, nil
+// 	}
+// 	cache.spec = cq.Spec.ResourceGroups
+// 	return true, nil
+// }
 
-func (r *ClusterQueueReconciler) updateEffectiveResourceGroups(ctx context.Context, cq *kueue.ClusterQueue, cache *QuotaCache) (bool, error) {
-	effectiveQuota := cache.spec
-	mkQuota := cache.mkAggregatedQuota
-	if mkQuota != nil {
-		effectiveQuota = []kueue.ResourceGroup{*mkQuota}
-	}
-	if equality.Semantic.DeepEqual(cq.Status.EffectiveResourceGroups, effectiveQuota) {
-		return false, nil
-	}
-	cq.Status.EffectiveResourceGroups = effectiveQuota
-	return true, r.client.Status().Update(ctx, cq)
-}
+// func (r *ClusterQueueReconciler) updateEffectiveResourceGroups(ctx context.Context, cq *kueue.ClusterQueue, cache *queue.QuotaCache) (bool, error) {
+// 	effectiveQuota := cache.spec
+// 	mkQuota := cache.mkAggregatedQuota
+// 	if mkQuota != nil {
+// 		effectiveQuota = []kueue.ResourceGroup{*mkQuota}
+// 	}
+// 	if equality.Semantic.DeepEqual(cq.Status.EffectiveResourceGroups, effectiveQuota) {
+// 		return false, nil
+// 	}
+// 	cq.Status.EffectiveResourceGroups = effectiveQuota
+// 	return true, r.client.Status().Update(ctx, cq)
+// }
 
 func (r *ClusterQueueReconciler) logger() logr.Logger {
 	return roletracker.WithReplicaRole(ctrl.Log.WithName(r.logName), r.roleTracker)
@@ -202,12 +193,6 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			kueue.ClusterQueueReference(cqObj.Name),
 			cqObj.GetLabels(), cqObj.GetAnnotations(),
 		)
-	}
-
-	if r.quotaManager != nil {
-		if err := r.quotaManager.UpdateQuota(UpdateStepSpec, ctx, &cqObj); err != nil {
-			return ctrl.Result{}, err
-		}
 	}
 
 	if cqObj.DeletionTimestamp.IsZero() {

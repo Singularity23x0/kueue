@@ -160,6 +160,39 @@ type ClusterQueueSpec struct {
 	//
 	// +optional
 	ConcurrentAdmissionPolicy *ConcurrentAdmissionPolicy `json:"concurrentAdmissionPolicy,omitempty"`
+
+	QuotaAutomationConfig *QuotaAutomationConfig `json:"quotaAutomationConfig,omitempty"`
+}
+
+type QuotaAutomationMode string
+
+const (
+	Manual    QuotaAutomationMode = "Manual"
+	Automated QuotaAutomationMode = "Automated"
+)
+
+type QuotaCalculationStepID = string
+
+const (
+	MultiKueueAutoAggregationStep QuotaCalculationStepID = "MultiKueueAutoAggregation"
+)
+
+type QuotaCalculationStepConfigField = string
+
+const (
+	AggregateFlavorRef QuotaCalculationStepConfigField = "AggregateFlavorRef"
+)
+
+type QuotaCalculationStep struct {
+	ID QuotaCalculationStepID
+}
+
+type QuotaAutomationConfig struct {
+	Mode QuotaAutomationMode `json:"mode,omitempty"`
+
+	// Only present when mode is Automated.
+	AutomatedQuotaCalculationSteps []QuotaCalculationStep                     `json:"automatedQuotaCalculationSteps,omitempty"`
+	AutomationConfigMap            map[QuotaCalculationStepConfigField]string `json:"configMap,omitempty"`
 }
 
 // AdmissionChecksStrategy defines a strategy for a AdmissionCheck.

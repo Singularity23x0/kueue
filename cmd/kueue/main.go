@@ -53,6 +53,7 @@ import (
 	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
 	kueuev1beta1 "sigs.k8s.io/kueue/apis/kueue/v1beta1"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	"sigs.k8s.io/kueue/pkg/cache/queue"
 	qcache "sigs.k8s.io/kueue/pkg/cache/queue"
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
 	"sigs.k8s.io/kueue/pkg/config"
@@ -473,10 +474,10 @@ func setupControllers(
 	serverVersionFetcher *kubeversion.ServerVersionFetcher,
 	opts core.SetupControllersOpts,
 ) error {
-	if features.Enabled(features.EffectiveResourceQuotas) {
-		opts.QuotaManagerOpts = &core.QuotaManagerOpts{
-			Manager: core.NewQuotaManager(),
-		}
+	// Here we inititate the quota manager for the effective resource quotas feature.
+	var qm *queue.QuotaManager
+	if features.Enabled(features.QuotaAutomation) {
+		qm = queue.NewQuotaManager()
 	}
 
 	if failedCtrl, err := core.SetupControllers(mgr, queues, cCache, cfg, opts); err != nil {
@@ -533,6 +534,7 @@ func setupControllers(
 			multikueue.WithDispatcherName(ptr.Deref(cfg.MultiKueue.DispatcherName, configapi.MultiKueueDispatcherModeAllAtOnce)),
 			multikueue.WithClusterProfiles(cfg.MultiKueue.ClusterProfile),
 			multikueue.WithRoleTracker(opts.RoleTracker),
+			multikueue.WithQuotaManager(qm),
 		); err != nil {
 			return fmt.Errorf("could not setup MultiKueue controller: %w", err)
 		}
@@ -586,10 +588,6 @@ func setupControllers(
 			serverVersionFetcher.GetServerVersion(),
 			err,
 		)
-	}
-
-	if opts.QuotaManagerOpts != nil {
-		opts.QuotaManagerOpts.Apply()
 	}
 
 	return nil

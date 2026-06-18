@@ -23,6 +23,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	configapi "sigs.k8s.io/kueue/apis/config/v1beta2"
+	"sigs.k8s.io/kueue/pkg/cache/queue"
 	"sigs.k8s.io/kueue/pkg/constants"
 	"sigs.k8s.io/kueue/pkg/controller/jobframework"
 	"sigs.k8s.io/kueue/pkg/features"
@@ -45,6 +46,7 @@ type SetupOptions struct {
 	dispatcherName       string
 	clusterProfileConfig *configapi.ClusterProfile
 	roleTracker          *roletracker.RoleTracker
+	quotaManager         *queue.QuotaManager
 }
 
 type SetupOption func(o *SetupOptions)
@@ -108,6 +110,13 @@ func WithRoleTracker(tracker *roletracker.RoleTracker) SetupOption {
 	}
 }
 
+// WithQuotaManager sets the quota manager for the multi-kueue admission check.
+func WithQuotaManager(qm *queue.QuotaManager) SetupOption {
+	return func(o *SetupOptions) {
+		o.quotaManager = qm
+	}
+}
+
 func SetupControllers(mgr ctrl.Manager, namespace string, opts ...SetupOption) error {
 	options := &SetupOptions{
 		gcInterval:        defaultGCInterval,
@@ -160,8 +169,8 @@ func SetupControllers(mgr ctrl.Manager, namespace string, opts ...SetupOption) e
 		return err
 	}
 
-	if features.Enabled(features.MultiKueueManagerQuotaAutomation) {
-		cqRec := newCQReconciler(mgr.GetClient(), helper, cRec, options.roleTracker, options.eventsBatchPeriod)
+	if features.Enabled(features.MultiKueueManagerQuotaAutomation) && options.quotaManager != nil {
+		cqRec := newCQReconciler(mgr.GetClient(), helper, cRec, options.quotaManager, options.roleTracker, options.eventsBatchPeriod)
 		err = cqRec.setupWithManager(mgr)
 		if err != nil {
 			return err
