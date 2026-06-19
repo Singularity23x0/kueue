@@ -1039,6 +1039,13 @@ Additionally after the admission, Workloads can still try to pursue capacity on 
 It enables them to migrate to more preferable, whenever capacity appears.</p>
 </td>
 </tr>
+<tr><td><code>quotaAutomationConfig</code><br/>
+<a href="#kueue-x-k8s-io-v1beta2-QuotaAutomationConfig"><code>QuotaAutomationConfig</code></a>
+</td>
+<td>
+   <p>quotaAutomationConfig defines the configuration for the quota automation mechanism.</p>
+</td>
+</tr>
 </tbody>
 </table>
 
@@ -1065,18 +1072,6 @@ It enables them to migrate to more preferable, whenever capacity appears.</p>
    <p>conditions hold the latest available observations of the ClusterQueue
 current state.
 conditions are limited to 16 elements.</p>
-</td>
-</tr>
-<tr><td><code>effectiveResourceGroups</code><br/>
-<a href="#kueue-x-k8s-io-v1beta2-ResourceGroup"><code>[]ResourceGroup</code></a>
-</td>
-<td>
-   <p>effectiveResourceGroups describes the groups of resources as seen by Kueue controllers.
-Each resource group defines the list of resources and a list of flavors
-that provide quotas for these resources.
-Each resource and each flavor can only form part of one resource group.
-By default, it's equal to spec.resourceGroups. However, in some scenarios (e.g. MultiKueue)
-it may differ from spec.resourceGroups.</p>
 </td>
 </tr>
 <tr><td><code>flavorsReservation</code><br/>
@@ -2999,6 +2994,72 @@ re-queuing an evicted workload.</p>
 
 
 
+## `QuotaAutomationConfig`     {#kueue-x-k8s-io-v1beta2-QuotaAutomationConfig}
+    
+
+**Appears in:**
+
+- [ClusterQueueSpec](#kueue-x-k8s-io-v1beta2-ClusterQueueSpec)
+
+
+<p>quotaAutomationConfig defines the configuration for the quota automation mechanism.</p>
+
+
+<table class="table">
+<thead><tr><th width="30%">Field</th><th>Description</th></tr></thead>
+<tbody>
+    
+  
+<tr><td><code>mode</code> <B>[Required]</B><br/>
+<a href="#kueue-x-k8s-io-v1beta2-QuotaAutomationMode"><code>QuotaAutomationMode</code></a>
+</td>
+<td>
+   <p>mode defines whether quota automation is enabled or disabled.</p>
+</td>
+</tr>
+<tr><td><code>steps</code><br/>
+<a href="#kueue-x-k8s-io-v1beta2-QuotaAutomationStep"><code>[]QuotaAutomationStep</code></a>
+</td>
+<td>
+   <p>steps lists the steps to be taken for quota automation and defines in what order to take them.
+Only present when mode is Automated.</p>
+</td>
+</tr>
+<tr><td><code>configMap</code><br/>
+<code>map[QuotaAutomationParameter]string</code>
+</td>
+<td>
+   <p>configMap lists configuration parameters for the steps.
+Only present when mode is Automated.</p>
+</td>
+</tr>
+</tbody>
+</table>
+
+## `QuotaAutomationMode`     {#kueue-x-k8s-io-v1beta2-QuotaAutomationMode}
+    
+(Alias of `string`)
+
+**Appears in:**
+
+- [QuotaAutomationConfig](#kueue-x-k8s-io-v1beta2-QuotaAutomationConfig)
+
+
+
+
+
+## `QuotaAutomationStep`     {#kueue-x-k8s-io-v1beta2-QuotaAutomationStep}
+    
+(Alias of `string`)
+
+**Appears in:**
+
+- [QuotaAutomationConfig](#kueue-x-k8s-io-v1beta2-QuotaAutomationConfig)
+
+
+
+
+
 ## `ReclaimablePod`     {#kueue-x-k8s-io-v1beta2-ReclaimablePod}
     
 
@@ -3166,8 +3227,6 @@ nodes matching to the Resource Flavor node labels.</p>
 **Appears in:**
 
 - [ClusterQueueSpec](#kueue-x-k8s-io-v1beta2-ClusterQueueSpec)
-
-- [ClusterQueueStatus](#kueue-x-k8s-io-v1beta2-ClusterQueueStatus)
 
 - [CohortSpec](#kueue-x-k8s-io-v1beta2-CohortSpec)
 

@@ -161,7 +161,10 @@ type ClusterQueueSpec struct {
 	// +optional
 	ConcurrentAdmissionPolicy *ConcurrentAdmissionPolicy `json:"concurrentAdmissionPolicy,omitempty"`
 
-	QuotaAutomationConfig *QuotaAutomationConfig `json:"quotaAutomationConfig,omitempty"`
+	// quotaAutomationConfig defines the configuration for the quota automation mechanism.
+	//
+	// +optional
+	QuotaAutomationConfig QuotaAutomationConfig `json:"quotaAutomationConfig,omitempty"`
 }
 
 type QuotaAutomationMode string
@@ -171,28 +174,38 @@ const (
 	Automated QuotaAutomationMode = "Automated"
 )
 
-type QuotaCalculationStepID = string
+type QuotaAutomationStep string
 
 const (
-	MultiKueueAutoAggregationStep QuotaCalculationStepID = "MultiKueueAutoAggregation"
+	MultiKueueAutoAggregationStep QuotaAutomationStep = "MultiKueueAutoAggregation"
 )
 
-type QuotaCalculationStepConfigField = string
+type QuotaAutomationParameter string
 
 const (
-	AggregateFlavorRef QuotaCalculationStepConfigField = "AggregateFlavorRef"
+	AggregateFlavorRef QuotaAutomationParameter = "AggregateFlavorRef"
 )
 
-type QuotaCalculationStep struct {
-	ID QuotaCalculationStepID
-}
-
+// quotaAutomationConfig defines the configuration for the quota automation mechanism.
+//
+// +kubebuilder:validation:XValidation:rule="self.mode == Manual ? !has(self.steps) && !has(self.configMap) : has(self.steps)", message="steps and configMap must be empty when mode is Manual"
+// +kubebuilder:validation:XValidation:rule="self.steps.any(step, step == MultiKueueAutoAggregationStep) ? has(self.configMap) && has(self.configMap[AggregateFlavorRef]) : true", message="MultiKueue automation requires the aggregate flavor reference to be present in the configMap"
 type QuotaAutomationConfig struct {
+	// mode defines whether quota automation is enabled or disabled.
+	// +kubebuilder:default="Manual"
 	Mode QuotaAutomationMode `json:"mode,omitempty"`
 
+	// steps lists the steps to be taken for quota automation and defines in what order to take them.
 	// Only present when mode is Automated.
-	AutomatedQuotaCalculationSteps []QuotaCalculationStep                     `json:"automatedQuotaCalculationSteps,omitempty"`
-	AutomationConfigMap            map[QuotaCalculationStepConfigField]string `json:"configMap,omitempty"`
+	//
+	// +optional
+	Steps []QuotaAutomationStep `json:"steps,omitempty"`
+
+	// configMap lists configuration parameters for the steps.
+	// Only present when mode is Automated.
+	//
+	// +optional
+	ConfigMap map[QuotaAutomationParameter]string `json:"configMap,omitempty"`
 }
 
 // AdmissionChecksStrategy defines a strategy for a AdmissionCheck.
@@ -392,17 +405,6 @@ type ClusterQueueStatus struct {
 	// +patchMergeKey=type
 	// +kubebuilder:validation:MaxItems=16
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
-
-	// effectiveResourceGroups describes the groups of resources as seen by Kueue controllers.
-	// Each resource group defines the list of resources and a list of flavors
-	// that provide quotas for these resources.
-	// Each resource and each flavor can only form part of one resource group.
-	// By default, it's equal to spec.resourceGroups. However, in some scenarios (e.g. MultiKueue)
-	// it may differ from spec.resourceGroups.
-	// +listType=atomic
-	// +kubebuilder:validation:MaxItems=16
-	// +optional
-	EffectiveResourceGroups []ResourceGroup `json:"effectiveResourceGroups,omitempty"`
 
 	// flavorsReservation are the reserved quotas, by flavor, currently in use by the
 	// workloads assigned to this ClusterQueue.

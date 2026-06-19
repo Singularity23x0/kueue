@@ -91,6 +91,8 @@ type ClusterQueueSpecApplyConfiguration struct {
 	// Additionally after the admission, Workloads can still try to pursue capacity on the more preferable flavors while running.
 	// It enables them to migrate to more preferable, whenever capacity appears.
 	ConcurrentAdmissionPolicy *ConcurrentAdmissionPolicyApplyConfiguration `json:"concurrentAdmissionPolicy,omitempty"`
+	// quotaAutomationConfig defines the configuration for the quota automation mechanism.
+	QuotaAutomationConfig *QuotaAutomationConfigApplyConfiguration `json:"quotaAutomationConfig,omitempty"`
 }
 
 // ClusterQueueSpecApplyConfiguration constructs a declarative configuration of the ClusterQueueSpec type for use with
@@ -189,5 +191,13 @@ func (b *ClusterQueueSpecApplyConfiguration) WithAdmissionScope(value *Admission
 // If called multiple times, the ConcurrentAdmissionPolicy field is set to the value of the last call.
 func (b *ClusterQueueSpecApplyConfiguration) WithConcurrentAdmissionPolicy(value *ConcurrentAdmissionPolicyApplyConfiguration) *ClusterQueueSpecApplyConfiguration {
 	b.ConcurrentAdmissionPolicy = value
+	return b
+}
+
+// WithQuotaAutomationConfig sets the QuotaAutomationConfig field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the QuotaAutomationConfig field is set to the value of the last call.
+func (b *ClusterQueueSpecApplyConfiguration) WithQuotaAutomationConfig(value *QuotaAutomationConfigApplyConfiguration) *ClusterQueueSpecApplyConfiguration {
+	b.QuotaAutomationConfig = value
 	return b
 }

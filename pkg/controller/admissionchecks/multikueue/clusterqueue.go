@@ -69,12 +69,12 @@ func newCQReconciler(c client.Client, helper *admissioncheck.MultiKueueStoreHelp
 		eventsBatchPeriod: eventsBatchPeriod,
 		qm:                quotaManger,
 	}
-	r.qm.WithStep(kueue.MultiKueueAutoAggregationStep, r.aggregateWorkerQuota)
+	r.qm.SetStepFunc(kueue.MultiKueueAutoAggregationStep, r.aggregateWorkerQuota)
 	return r
 }
 
-func (r *cqReconciler) aggregateWorkerQuota(ctx context.Context, cq *kueue.ClusterQueue, input []kueue.ResourceGroup, opts queue.StepOptions) (result []kueue.ResourceGroup, cont bool, err error) {
-	aggregateFlavorRef, ok := opts[kueue.AggregateFlavorRef]
+func (r *cqReconciler) aggregateWorkerQuota(ctx context.Context, cq *kueue.ClusterQueue, input []kueue.ResourceGroup) (result []kueue.ResourceGroup, cont bool, err error) {
+	aggregateFlavorRef, ok := cq.Spec.QuotaAutomationConfig.ConfigMap[kueue.AggregateFlavorRef]
 	if !ok {
 		err := r.updateQuotaAutomationCondition(ctx, cq, metav1.ConditionFalse, "UnsupportedConfiguration", "Cannot determine what flavot to aggrgate quota under.")
 		return nil, false, errors.Join(fmt.Errorf("missing configuration field: %s", kueue.AggregateFlavorRef), err)
@@ -139,7 +139,7 @@ func (r *cqReconciler) Reconcile(ctx context.Context, req reconcile.Request) (re
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if cqHasMKAutomation, err := r.qm.TriggerQuotaUpdate(ctx, kueue.MultiKueueAutoAggregationStep, cq); !cqHasMKAutomation {
+	if cqHasMKAutomation, err := r.qm.TriggerUpdate(ctx, kueue.MultiKueueAutoAggregationStep, cq); !cqHasMKAutomation {
 		return reconcile.Result{}, r.updateQuotaAutomationCondition(ctx, cq, metav1.ConditionFalse, "NotRequested", "MultiKueue manager quota automation has not been requested.")
 	} else {
 		return reconcile.Result{}, err

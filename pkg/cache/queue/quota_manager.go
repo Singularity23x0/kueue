@@ -26,110 +26,106 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 )
 
-// QuotaCalculationStep takis in the cluster queue, the result of the previous step as input and the options defined for this step in the ClusterQueue Spec.
+// QuotaAutomationStepFunc takis in the cluster queue, the result of the previous step as input and the options defined for this step in the ClusterQueue Spec.
 // It returns the effective quota it calculated, a boolean indicating whether the quota update chain should continue or cancel, and an error if occured (which will also cancel the chain).
-type QuotaCalculationStep = func(ctx context.Context, cq *kueue.ClusterQueue, input ResourceGroups, opts StepOptions) (result ResourceGroups, cont bool, err error)
+type QuotaAutomationStepFunc = func(ctx context.Context, cq *kueue.ClusterQueue, input ResourceGroups) (result ResourceGroups, cont bool, err error)
 type ResourceGroups = []kueue.ResourceGroup
-type StepOptions = map[kueue.QuotaCalculationStepConfigField]string
-type QuotaCalcucaltionSteps = map[kueue.QuotaCalculationStepID]QuotaCalculationStep
+type AutomationStepFuncs = map[kueue.QuotaAutomationStep]QuotaAutomationStepFunc
 
 type QuotaManager struct {
-	client                 client.Client
-	quotaCaches            map[kueue.ClusterQueueReference]*QuotaCache
-	quotaCalcucaltionSteps QuotaCalcucaltionSteps
+	client              client.Client
+	quotaCaches         map[kueue.ClusterQueueReference]*QuotaCache
+	automationStepFuncs AutomationStepFuncs
 }
 
 // QuotaCache is the internal cache of the QuotaManager.
 // It is used by QuotaUpdateSteps to pass partial quota calculation results to following steps.
 type QuotaCache struct {
 	sync.RWMutex
-	// The field representing the value we want to be present in the spec of the CQ.
-	cache map[kueue.QuotaCalculationStepID]ResourceGroups
+	data map[kueue.QuotaAutomationStep]ResourceGroups
 }
 
 func NewQuotaManager() *QuotaManager {
 	return &QuotaManager{
-		quotaCaches:            make(map[kueue.ClusterQueueReference]*QuotaCache),
-		quotaCalcucaltionSteps: make(QuotaCalcucaltionSteps),
+		quotaCaches:         make(map[kueue.ClusterQueueReference]*QuotaCache),
+		automationStepFuncs: make(AutomationStepFuncs),
 	}
 }
 
-func (qm *QuotaManager) WithStep(id kueue.QuotaCalculationStepID, step QuotaCalculationStep) {
-	qm.quotaCalcucaltionSteps[id] = step
+func (qm *QuotaManager) SetStepFunc(step kueue.QuotaAutomationStep, fn QuotaAutomationStepFunc) {
+	qm.automationStepFuncs[step] = fn
 }
 
-func (qm *QuotaManager) TriggerQuotaUpdate(ctx context.Context, caller kueue.QuotaCalculationStepID, cq *kueue.ClusterQueue) (updatePossible bool, err error) {
+func (qm *QuotaManager) TriggerUpdate(ctx context.Context, startStep kueue.QuotaAutomationStep, cq *kueue.ClusterQueue) (automationPossible bool, err error) {
 	if cq.Spec.QuotaAutomationConfig.Mode != kueue.Automated {
-		// Nothing to do.
 		return false, nil
 	}
 	cqRef := kueue.ClusterQueueReference(cq.Name)
 	if _, ok := qm.quotaCaches[cqRef]; !ok {
 		qm.quotaCaches[cqRef] = &QuotaCache{
-			cache: make(map[kueue.QuotaCalculationStepID]ResourceGroups),
+			data: make(map[kueue.QuotaAutomationStep]ResourceGroups),
 		}
 	}
-	return qm.quotaCaches[cqRef].updateQuota(ctx, qm.client, cq, caller, &qm.quotaCalcucaltionSteps)
+	return qm.quotaCaches[cqRef].updateQuota(ctx, qm.client, cq, startStep, &qm.automationStepFuncs)
 }
 
-func (c *QuotaCache) updateQuota(ctx context.Context, cli client.Client, cq *kueue.ClusterQueue, startStep kueue.QuotaCalculationStepID, updateFuncs *QuotaCalcucaltionSteps) (bool, error) {
-	c.Lock()
-	defer c.Unlock()
+func (qc *QuotaCache) updateQuota(ctx context.Context, client client.Client, cq *kueue.ClusterQueue, startStep kueue.QuotaAutomationStep, stepFuncs *AutomationStepFuncs) (bool, error) {
+	qc.Lock()
+	defer qc.Unlock()
 
-	stepIdx, ok := c.getStepIdx(startStep, cq)
+	stepIdx, ok := qc.getStepIdx(startStep, cq)
 	if !ok {
 		// This step is not configured for this ClusterQueue.
 		return false, nil
 	}
 
-	newCachedData := make(map[kueue.QuotaCalculationStepID]ResourceGroups)
-	for _, step := range cq.Spec.QuotaAutomationConfig.AutomatedQuotaCalculationSteps[:stepIdx] {
-		_, supported := (*updateFuncs)[step.ID]
+	newCachedData := make(map[kueue.QuotaAutomationStep]ResourceGroups)
+
+	// 1. Copy the data of previous steps.
+	for _, step := range cq.Spec.QuotaAutomationConfig.Steps[:stepIdx] {
+		_, supported := (*stepFuncs)[step]
 		if !supported {
-			// ClusterQueue has an illegal step configured.
-			return false, fmt.Errorf("ClusterQueue %s: step %s not supported", cq.Name, step.ID)
+			// ClusterQueue has an unsupported step configured.
+			return false, fmt.Errorf("ClusterQueue %s: step %s not supported", cq.Name, step)
 		}
-		newCachedData[step.ID] = c.cache[step.ID]
+		newCachedData[step] = qc.data[step]
 	}
 
-	var lastResult ResourceGroups = ResourceGroups{}
+	lastResult := ResourceGroups{}
 	if stepIdx > 0 {
-		prevStep := cq.Spec.QuotaAutomationConfig.AutomatedQuotaCalculationSteps[stepIdx-1]
-		lastResult = c.cache[prevStep.ID]
+		prevStep := cq.Spec.QuotaAutomationConfig.Steps[stepIdx-1]
+		lastResult = qc.data[prevStep]
 	}
 
-	for _, step := range cq.Spec.QuotaAutomationConfig.AutomatedQuotaCalculationSteps[stepIdx:] {
-		updateFunc, supported := (*updateFuncs)[step.ID]
+	// 2. Perform all steps starting from startStep.
+	for _, step := range cq.Spec.QuotaAutomationConfig.Steps[stepIdx:] {
+		updateFunc, supported := (*stepFuncs)[step]
 		if !supported {
-			// ClusterQueue has an illegal step configured.
-			return false, fmt.Errorf("ClusterQueue %s: step %s not supported", cq.Name, step.ID)
+			// ClusterQueue has an unsupported step configured.
+			return false, fmt.Errorf("ClusterQueue %s: step %s not supported", cq.Name, step)
 		}
 
-		result, cont, err := updateFunc(ctx, cq, lastResult, cq.Spec.QuotaAutomationConfig.AutomationConfigMap)
-		if err != nil {
+		result, cont, err := updateFunc(ctx, cq, lastResult)
+		if !cont || err != nil {
 			return true, err
 		}
 
-		newCachedData[step.ID] = result
+		newCachedData[step] = result
 		lastResult = result
-
-		if !cont {
-			return true, nil
-		}
 	}
 
-	c.cache = newCachedData
+	qc.data = newCachedData
 	if !equality.Semantic.DeepEqual(cq.Spec.ResourceGroups, lastResult) {
 		cq.Spec.ResourceGroups = lastResult
-		return true, cli.Update(ctx, cq)
+		return true, client.Update(ctx, cq)
 	}
 	return true, nil
 }
 
-func (c *QuotaCache) getStepIdx(stepID kueue.QuotaCalculationStepID, cq *kueue.ClusterQueue) (int, bool) {
-	for i, step := range cq.Spec.QuotaAutomationConfig.AutomatedQuotaCalculationSteps {
-		if step.ID == stepID {
-			return i, true
+func (c *QuotaCache) getStepIdx(soughtStep kueue.QuotaAutomationStep, cq *kueue.ClusterQueue) (int, bool) {
+	for idx, step := range cq.Spec.QuotaAutomationConfig.Steps {
+		if step == soughtStep {
+			return idx, true
 		}
 	}
 	return 0, false
