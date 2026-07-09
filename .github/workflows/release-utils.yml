@@ -9,7 +9,7 @@ jobs:
     if: |
       github.event.issue.pull_request == null &&
       (startsWith(github.event.comment.body, '/sync-release-notes') ||
-       startsWith(github.event.comment.body, '/prepare-release') ||
+       startsWith(github.event.comment.body, '/prepare-') ||
        startsWith(github.event.comment.body, '/release'))
     outputs:
       command: ${{ steps.parse.outputs.command }}
@@ -55,9 +55,12 @@ jobs:
 
           if [[ "$BODY" =~ ^/sync-release-notes[[:space:]]*$ ]]; then
             echo "command=sync-notes" >> "$GITHUB_OUTPUT"
-          elif [[ "$BODY" =~ ^/prepare-release[[:space:]]+(main|release)[[:space:]]*$ ]]; then
+          elif [[ "$BODY" =~ ^/prepare-release-branch[[:space:]]*$ ]]; then
             echo "command=prepare" >> "$GITHUB_OUTPUT"
-            echo "target=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "target=release" >> "$GITHUB_OUTPUT"
+          elif [[ "$BODY" =~ ^/prepare-main-branch[[:space:]]*$ ]]; then
+            echo "command=prepare" >> "$GITHUB_OUTPUT"
+            echo "target=main" >> "$GITHUB_OUTPUT"
           elif [[ "$BODY" =~ ^/release[[:space:]]*$ ]]; then
             echo "command=release" >> "$GITHUB_OUTPUT"
           elif [[ "$BODY" =~ ^/publish-release[[:space:]]*$ ]]; then

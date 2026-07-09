@@ -20,7 +20,7 @@ Please do not remove items from the checklist
   - [ ] An OWNER pushes the new release branch with
         `git push upstream release-$MAJ.$MIN`
 - [ ] Update the release branch:
-  - [ ] Run ChatOps command `/prepare-release release` on this issue to generate version updates and open a PR.
+  - [ ] Run ChatOps command `/prepare-release-branch` on this issue to generate version updates and open a PR.
   - [ ] Wait for this PR to merge <!-- PREPARE_PULL_RELEASE --> <!-- example #211 -->
 - [ ] Run ChatOps command `/release` on this issue. This will:
   - Create and sign the release tag.
@@ -35,7 +35,7 @@ Please do not remove items from the checklist
 - [ ] Run ChatOps command `/publish-release` on this issue to publish the draft release.
   - This automatically triggers the SBOM and OpenVEX generation webhooks which upload metadata to the published release.
 - [ ] Update the `main` branch:
-  - [ ] Run ChatOps command `/prepare-release main` on this issue.
+  - [ ] Run ChatOps command `/prepare-main-branch` on this issue.
   - [ ] Wait for this PR to merge <!-- PREPARE_PULL_MAIN --> <!-- example #214 -->
   - [ ] Cherry-pick the pull request onto the `website` branch.
 - [ ] For major or minor releases, merge the `main` branch into the `website` branch to publish the updated documentation.
