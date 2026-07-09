@@ -45,8 +45,9 @@ Please do not remove items from the checklist
 - [ ] For major or minor releases, merge the `main` branch into the `website` branch to publish the updated documentation.
 - [ ] Send an announcement email to `sig-scheduling@kubernetes.io` and `wg-batch@kubernetes.io` with the subject `[ANNOUNCE] kueue $VERSION is released`.   <!--Link: example https://groups.google.com/a/kubernetes.io/g/wg-batch/c/-gZOrSnwDV4 -->
 - [ ] For a major or minor release, prepare the repo for the next version:
-  - [ ] Prow Job Updates: Create the presubmits and the periodic jobs for the next patch release, and drop jobs for the out-of-support branch: <!-- CI_PULL -->
-        <!-- example: https://github.com/kubernetes/test-infra/pull/34561 -->
+  - [ ] Create the presubmits and the periodic jobs for the next patch release: <!-- CI_PULL -->
+  - [ ] Drop CI Jobs for testing the out-of-support branch: <!-- CI_PULL -->
+        <!-- example: https://github.com/kubernetes/test-infra/pull/34562 -->
 
 
 ## Changelog
