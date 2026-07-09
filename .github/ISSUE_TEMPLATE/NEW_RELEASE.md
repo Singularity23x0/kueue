@@ -20,7 +20,7 @@ Please do not remove items from the checklist
   - [ ] An OWNER pushes the new release branch with
         `git push upstream release-$MAJ.$MIN`
 - [ ] Update the release branch:
-  - [ ] Run ChatOps command `/prepare-release-branch` on this issue to generate version updates and open a PR.
+  - [ ] Run `./hack/releasing/prepare_pull.sh --target release $VERSION` locally to generate version updates and open a PR.
   - [ ] Wait for this PR to merge <!-- PREPARE_PULL_RELEASE --> <!-- example #211 -->
 - [ ] Run ChatOps command `/release` on this issue. This will:
   - Create and sign the release tag.
@@ -32,10 +32,11 @@ Please do not remove items from the checklist
   - [ ] Run `./hack/releasing/promote_pull.sh $VERSION` to submit the promotion PR.
   - [ ] Wait for the PR to be merged <!-- K8S_IO_PULL --> <!-- example kubernetes/k8s.io#7899 -->
   - [ ] Run: `./hack/releasing/wait_for_images.sh --prod $VERSION` to verify that the promoted images are available.
-- [ ] Run ChatOps command `/publish-release` on this issue to publish the draft release.
+- [ ] Publish the draft release prepared at the [GitHub releases page](https://github.com/kubernetes-sigs/kueue/releases).
   - This automatically triggers the SBOM and OpenVEX generation webhooks which upload metadata to the published release.
 - [ ] Update the `main` branch:
-  - [ ] Run ChatOps command `/prepare-main-branch` on this issue.
+  - [ ] Run `./hack/releasing/prepare_pull.sh --target main $VERSION` locally.
+        Note: Add --skip-version-updates if a newer minor or major version is already out.
   - [ ] Wait for this PR to merge <!-- PREPARE_PULL_MAIN --> <!-- example #214 -->
   - [ ] Cherry-pick the pull request onto the `website` branch.
 - [ ] For major or minor releases, merge the `main` branch into the `website` branch to publish the updated documentation.

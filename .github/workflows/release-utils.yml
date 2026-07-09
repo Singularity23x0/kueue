@@ -9,13 +9,11 @@ jobs:
     if: |
       github.event.issue.pull_request == null &&
       (startsWith(github.event.comment.body, '/sync-release-notes') ||
-       startsWith(github.event.comment.body, '/prepare-') ||
-       startsWith(github.event.comment.body, '/release'))
+       (startsWith(github.event.comment.body, '/release') && !startsWith(github.event.comment.body, '/release-') && !startsWith(github.event.comment.body, '/publish-release')))
     outputs:
       command: ${{ steps.parse.outputs.command }}
       version: ${{ steps.parse.outputs.version }}
       branch: ${{ steps.parse.outputs.branch }}
-      target: ${{ steps.parse.outputs.target }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -41,6 +39,7 @@ jobs:
         env:
           BODY: ${{ github.event.comment.body }}
           TITLE: ${{ github.event.issue.title }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [[ ! "$TITLE" =~ ^Release\ (v[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
             echo "Error: Issue title '$TITLE' does not match 'Release vX.Y.Z'"
@@ -53,22 +52,17 @@ jobs:
             echo "branch=release-${BASH_REMATCH[1]}.${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
           fi
 
+          COMMAND=""
           if [[ "$BODY" =~ ^/sync-release-notes[[:space:]]*$ ]]; then
-            echo "command=sync-notes" >> "$GITHUB_OUTPUT"
-          elif [[ "$BODY" =~ ^/prepare-release-branch[[:space:]]*$ ]]; then
-            echo "command=prepare" >> "$GITHUB_OUTPUT"
-            echo "target=release" >> "$GITHUB_OUTPUT"
-          elif [[ "$BODY" =~ ^/prepare-main-branch[[:space:]]*$ ]]; then
-            echo "command=prepare" >> "$GITHUB_OUTPUT"
-            echo "target=main" >> "$GITHUB_OUTPUT"
+            COMMAND="sync-notes"
           elif [[ "$BODY" =~ ^/release[[:space:]]*$ ]]; then
-            echo "command=release" >> "$GITHUB_OUTPUT"
-          elif [[ "$BODY" =~ ^/publish-release[[:space:]]*$ ]]; then
-            echo "command=publish-release" >> "$GITHUB_OUTPUT"
+            COMMAND="release"
           else
             echo "Error: Unsupported or invalid command format."
             exit 1
           fi
+
+          echo "command=$COMMAND" >> "$GITHUB_OUTPUT"
 
   sync-notes:
     name: Sync Release Notes
@@ -104,42 +98,6 @@ jobs:
           git config --global user.email "kueue-release-bot@kubernetes.io"
           
           yes y | ./hack/releasing/sync-notes.sh "$VERSION"
-
-  prepare-pr:
-    name: Prepare Release PR
-    runs-on: ubuntu-latest
-    needs: authorize
-    if: ${{ needs.authorize.outputs.command == 'prepare' }}
-    permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-        with:
-          go-version-file: 'go.mod'
-
-      - name: Configure Git User
-        run: |
-          git config --global user.name "kueue-release-bot"
-          git config --global user.email "kueue-release-bot@kubernetes.io"
-
-      - name: Run Prepare Pull
-        env:
-          GITHUB_USER: ${{ github.repository_owner }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          UPSTREAM_REMOTE: origin
-          FORK_REMOTE: origin
-          VERSION: ${{ needs.authorize.outputs.version }}
-          TARGET: ${{ needs.authorize.outputs.target }}
-        run: |
-          yes y | ./hack/releasing/prepare_pull.sh --target "$TARGET" "$VERSION"
 
   release:
     name: Tag and Draft Release
@@ -186,14 +144,12 @@ jobs:
           # A. Generate Release Notes to a file to prevent shell escaping errors
           gh release notes --generate-notes --tag "$VERSION" --target "$BRANCH" > notes.txt
           
-          # B. Compile Artifacts first to ensure the build succeeds before pushing the tag
-          make release-artifacts IMAGE_REGISTRY=registry.k8s.io/kueue GIT_TAG="$VERSION"
-          
-          # C. Create and Sign the Tag
+          # B. Create and Sign the Tag
           git tag -s "$VERSION" -F notes.txt
           git push origin "$VERSION"
           
-          # D. Create draft release
+          # C. Compile Artifacts and Create draft release
+          make release-artifacts IMAGE_REGISTRY=registry.k8s.io/kueue GIT_TAG="$VERSION"
           gh release create "$VERSION" --draft \
             --title "$VERSION" \
             --notes-file notes.txt \
@@ -214,23 +170,3 @@ jobs:
             # Create next minor milestone
             gh milestone create --title "v${MAJ}.${NEXT_MIN}.0"
           fi
-
-  publish-release:
-    name: Publish Release
-    runs-on: ubuntu-latest
-    needs: authorize
-    if: ${{ needs.authorize.outputs.command == 'publish-release' }}
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-
-      - name: Publish draft release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.authorize.outputs.version }}
-        run: |
-          gh release edit "$VERSION" --draft=false
