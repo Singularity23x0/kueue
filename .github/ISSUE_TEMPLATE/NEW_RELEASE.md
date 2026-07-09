@@ -13,14 +13,15 @@ Please do not remove items from the checklist
 - [ ] [OWNERS](https://github.com/kubernetes-sigs/kueue/blob/main/OWNERS) must LGTM the release proposal.
   At least two for minor or major releases. At least one for a patch release.
 - [ ] Verify that the changelog in this issue and the CHANGELOG folder is up-to-date
-  - [ ] Run ChatOps command `/sync-release-notes` to generate and publish the release notes
+  - [ ] Use `/sync-release-notes` to generate and publish the release notes
 - [ ] For major or minor releases (v$MAJ.$MIN.0), create a new release branch.
   - [ ] An OWNER creates a vanilla release branch with
         `git branch release-$MAJ.$MIN main`
   - [ ] An OWNER pushes the new release branch with
         `git push upstream release-$MAJ.$MIN`
 - [ ] Update the release branch:
-  - [ ] Run `./hack/releasing/prepare_pull.sh --target release $VERSION` locally to generate version updates and open a PR.
+  - [ ] Ensure there are no unstaged changes in your directory (the script adds everything)
+  - [ ] Run `./hack/releasing/prepare_pull.sh --target release $VERSION`
   - [ ] Wait for this PR to merge <!-- PREPARE_PULL_RELEASE --> <!-- example #211 -->
 - [ ] Run ChatOps command `/release` on this issue. This will:
   - Create and sign the release tag.
@@ -28,17 +29,19 @@ Please do not remove items from the checklist
   - Compile release artifacts and create a draft release.
   - For major/minor releases, tag the next devel version and create the GitHub milestone automatically.
 - [ ] Promote images and Helm Charts to production:
-  - [ ] Run `./hack/releasing/wait_for_images.sh $VERSION` to await the staging images.
-  - [ ] Run `./hack/releasing/promote_pull.sh $VERSION` to submit the promotion PR.
+  - [ ] Run `./hack/releasing/wait_for_images.sh $VERSION` to await for the staging images.
+  - [ ] Run `./hack/releasing/promote_pull.sh $VERSION` to submit the promotion PR
   - [ ] Wait for the PR to be merged <!-- K8S_IO_PULL --> <!-- example kubernetes/k8s.io#7899 -->
   - [ ] Run: `./hack/releasing/wait_for_images.sh --prod $VERSION` to verify that the promoted images are available.
 - [ ] Publish the draft release prepared at the [GitHub releases page](https://github.com/kubernetes-sigs/kueue/releases).
-  - This automatically triggers the SBOM and OpenVEX generation webhooks which upload metadata to the published release.
-- [ ] Update the `main` branch:
-  - [ ] Run `./hack/releasing/prepare_pull.sh --target main $VERSION` locally.
+      Link: <!-- example https://github.com/kubernetes-sigs/kueue/releases/tag/v0.1.0 -->
+- [ ] Run the [openvex action](https://github.com/kubernetes-sigs/kueue/actions/workflows/openvex.yaml) to generate openvex data. The action will add the file to the release artifacts.
+- [ ] Run the [SBOM action](https://github.com/kubernetes-sigs/kueue/actions/workflows/sbom.yaml) to generate the SBOM and add it to the release.
+- [ ] Update the `main` branch :
+  - [ ] Run `./hack/releasing/prepare_pull.sh --target main $VERSION`
         Note: Add --skip-version-updates if a newer minor or major version is already out.
   - [ ] Wait for this PR to merge <!-- PREPARE_PULL_MAIN --> <!-- example #214 -->
-  - [ ] Cherry-pick the pull request onto the `website` branch.
+  - [ ] Cherry-pick the pull request onto the `website` branch
 - [ ] For major or minor releases, merge the `main` branch into the `website` branch to publish the updated documentation.
 - [ ] Send an announcement email to `sig-scheduling@kubernetes.io` and `wg-batch@kubernetes.io` with the subject `[ANNOUNCE] kueue $VERSION is released`.   <!--Link: example https://groups.google.com/a/kubernetes.io/g/wg-batch/c/-gZOrSnwDV4 -->
 - [ ] For a major or minor release, prepare the repo for the next version:
