@@ -3,13 +3,19 @@ on:
     types: [created]
 
 jobs:
-  sync-notes:
-    name: Sync Release Notes
+  authorize:
+    name: Authorize and Parse Command
     runs-on: ubuntu-latest
-    if: ${{ startsWith(github.event.comment.body, '/sync-release-notes') }}
-    permissions:
-      contents: read
-      issues: write
+    if: |
+      github.event.issue.pull_request == null &&
+      (startsWith(github.event.comment.body, '/sync-release-notes') ||
+       startsWith(github.event.comment.body, '/prepare-release') ||
+       startsWith(github.event.comment.body, '/release'))
+    outputs:
+      command: ${{ steps.parse.outputs.command }}
+      version: ${{ steps.parse.outputs.version }}
+      branch: ${{ steps.parse.outputs.branch }}
+      target: ${{ steps.parse.outputs.target }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -30,24 +36,50 @@ jobs:
             exit 1
           fi
 
-      - name: Validate Command and Issue Title
-        id: validate
+      - name: Parse Command and Version
+        id: parse
         env:
           BODY: ${{ github.event.comment.body }}
           TITLE: ${{ github.event.issue.title }}
         run: |
-          if [[ ! "$BODY" =~ ^/sync-release-notes[[:space:]]*$ ]]; then
-            echo "Error: Invalid command format. Use /sync-release-notes without arguments."
-            exit 1
-          fi
-
           if [[ ! "$TITLE" =~ ^Release\ (v[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
             echo "Error: Issue title '$TITLE' does not match 'Release vX.Y.Z'"
             exit 1
           fi
-
           VERSION="${BASH_REMATCH[1]}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          if [[ "$VERSION" =~ ^v([0-9]+)\.([0-9]+)\.[0-9]+ ]]; then
+            echo "branch=release-${BASH_REMATCH[1]}.${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [[ "$BODY" =~ ^/sync-release-notes[[:space:]]*$ ]]; then
+            echo "command=sync-notes" >> "$GITHUB_OUTPUT"
+          elif [[ "$BODY" =~ ^/prepare-release[[:space:]]+(main|release)[[:space:]]*$ ]]; then
+            echo "command=prepare" >> "$GITHUB_OUTPUT"
+            echo "target=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          elif [[ "$BODY" =~ ^/release[[:space:]]*$ ]]; then
+            echo "command=release" >> "$GITHUB_OUTPUT"
+          elif [[ "$BODY" =~ ^/publish-release[[:space:]]*$ ]]; then
+            echo "command=publish-release" >> "$GITHUB_OUTPUT"
+          else
+            echo "Error: Unsupported or invalid command format."
+            exit 1
+          fi
+
+  sync-notes:
+    name: Sync Release Notes
+    runs-on: ubuntu-latest
+    needs: authorize
+    if: ${{ needs.authorize.outputs.command == 'sync-notes' }}
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
@@ -63,10 +95,139 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           UPSTREAM_REMOTE: origin
-          VERSION: ${{ steps.validate.outputs.version }}
+          VERSION: ${{ needs.authorize.outputs.version }}
         run: |
-          # Configure git identity
           git config --global user.name "kueue-release-bot"
           git config --global user.email "kueue-release-bot@kubernetes.io"
           
           yes y | ./hack/releasing/sync-notes.sh "$VERSION"
+
+  prepare-pr:
+    name: Prepare Release PR
+    runs-on: ubuntu-latest
+    needs: authorize
+    if: ${{ needs.authorize.outputs.command == 'prepare' }}
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Configure Git User
+        run: |
+          git config --global user.name "kueue-release-bot"
+          git config --global user.email "kueue-release-bot@kubernetes.io"
+
+      - name: Run Prepare Pull
+        env:
+          GITHUB_USER: ${{ github.repository_owner }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM_REMOTE: origin
+          FORK_REMOTE: origin
+          VERSION: ${{ needs.authorize.outputs.version }}
+          TARGET: ${{ needs.authorize.outputs.target }}
+        run: |
+          yes y | ./hack/releasing/prepare_pull.sh --target "$TARGET" "$VERSION"
+
+  release:
+    name: Tag and Draft Release
+    runs-on: ubuntu-latest
+    needs: authorize
+    if: ${{ needs.authorize.outputs.command == 'release' }}
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Checkout release branch
+        run: |
+          git checkout "${{ needs.authorize.outputs.branch }}"
+
+      - name: Configure Git User
+        run: |
+          git config --global user.name "kueue-release-bot"
+          git config --global user.email "kueue-release-bot@kubernetes.io"
+
+      - name: Import GPG Key
+        uses: crazy-max/ghaction-import-gpg@cb9bde2e2525e640591a934b1fd28eef1dcaf5e5 # v6.2.0
+        with:
+          gpg_private_key: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+          git_user_signingkey: true
+          git_commit_gpgsign: true
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Run Release Automation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.authorize.outputs.version }}
+          BRANCH: ${{ needs.authorize.outputs.branch }}
+        run: |
+          # A. Generate Release Notes to a file to prevent shell escaping errors
+          gh release notes --generate-notes --tag "$VERSION" --target "$BRANCH" > notes.txt
+          
+          # B. Compile Artifacts first to ensure the build succeeds before pushing the tag
+          make release-artifacts IMAGE_REGISTRY=registry.k8s.io/kueue GIT_TAG="$VERSION"
+          
+          # C. Create and Sign the Tag
+          git tag -s "$VERSION" -F notes.txt
+          git push origin "$VERSION"
+          
+          # D. Create draft release
+          gh release create "$VERSION" --draft \
+            --title "$VERSION" \
+            --notes-file notes.txt \
+            release-artifacts/*
+
+          # D. Tag next development version & create milestones
+          if [[ "$VERSION" =~ ^v([0-9]+)\.([0-9]+)\.0$ ]]; then
+            MAJ="${BASH_REMATCH[1]}"
+            MIN="${BASH_REMATCH[2]}"
+            NEXT_MIN=$((MIN + 1))
+            DEVEL="v${MAJ}.${NEXT_MIN}.0-devel"
+            
+            echo "Preparing repository for the next development cycle: $DEVEL"
+            git checkout main
+            git tag "$DEVEL" main
+            git push origin "$DEVEL"
+            
+            # Create next minor milestone
+            gh milestone create --title "v${MAJ}.${NEXT_MIN}.0"
+          fi
+
+  publish-release:
+    name: Publish Release
+    runs-on: ubuntu-latest
+    needs: authorize
+    if: ${{ needs.authorize.outputs.command == 'publish-release' }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.authorize.outputs.version }}
+        run: |
+          gh release edit "$VERSION" --draft=false
