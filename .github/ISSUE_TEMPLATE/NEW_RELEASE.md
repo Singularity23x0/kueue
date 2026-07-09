@@ -46,6 +46,7 @@ Please do not remove items from the checklist
 - [ ] Send an announcement email to `sig-scheduling@kubernetes.io` and `wg-batch@kubernetes.io` with the subject `[ANNOUNCE] kueue $VERSION is released`.   <!--Link: example https://groups.google.com/a/kubernetes.io/g/wg-batch/c/-gZOrSnwDV4 -->
 - [ ] For a major or minor release, prepare the repo for the next version:
   - [ ] Create the presubmits and the periodic jobs for the next patch release: <!-- CI_PULL -->
+        <!-- example: https://github.com/kubernetes/test-infra/pull/34561 -->
   - [ ] Drop CI Jobs for testing the out-of-support branch: <!-- CI_PULL -->
         <!-- example: https://github.com/kubernetes/test-infra/pull/34562 -->
 
