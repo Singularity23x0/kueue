@@ -9,7 +9,7 @@ jobs:
     if: |
       github.event.issue.pull_request == null &&
       (startsWith(github.event.comment.body, '/sync-release-notes') ||
-       (startsWith(github.event.comment.body, '/release') && !startsWith(github.event.comment.body, '/release-') && !startsWith(github.event.comment.body, '/publish-release')))
+       (startsWith(github.event.comment.body, '/release') && !startsWith(github.event.comment.body, '/release-')))
     outputs:
       command: ${{ steps.parse.outputs.command }}
       version: ${{ steps.parse.outputs.version }}
