@@ -9,6 +9,7 @@ jobs:
     if: |
       github.event.issue.pull_request == null &&
       (contains(github.event.comment.body, '/sync-release-notes') ||
+       contains(github.event.comment.body, '/tag-release') ||
        contains(github.event.comment.body, '/wait-for-images') ||
        contains(github.event.comment.body, '/wait-for-prod-images'))
     outputs:
@@ -53,7 +54,6 @@ jobs:
             gh issue comment "$ISSUE_NUMBER" --body "Invalid issue title: \`$TITLE\`. Expected format: \`Release vX.Y.Z\`."
             exit 0
           fi
-
           VERSION="${BASH_REMATCH[1]}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
@@ -64,6 +64,8 @@ jobs:
           COMMAND=""
           if printf '%s' "$BODY" | tr -d '\r' | grep -qE '^/sync-release-notes[[:space:]]*$'; then
             COMMAND="sync-notes"
+          elif printf '%s' "$BODY" | tr -d '\r' | grep -qE '^/tag-release[[:space:]]*$'; then
+            COMMAND="tag-release"
           elif printf '%s' "$BODY" | tr -d '\r' | grep -qE '^/wait-for-images[[:space:]]*$'; then
             COMMAND="wait-for-images"
           elif printf '%s' "$BODY" | tr -d '\r' | grep -qE '^/wait-for-prod-images[[:space:]]*$'; then
@@ -136,6 +138,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           VERSION: ${{ needs.authorize.outputs.version }}
+          COMMAND: ${{ needs.authorize.outputs.command }}
         run: |
           # Initialize an empty array for arguments
           ARGS=()
@@ -179,3 +182,66 @@ jobs:
           
           # Post the parsed comment to the GitHub issue.
           gh issue comment "$ISSUE_NUMBER" --body-file comment.md
+
+  tag-release:
+    name: Tag Release
+    runs-on: ubuntu-latest
+    needs: authorize
+    if: ${{ needs.authorize.outputs.command == 'tag-release' }}
+    permissions:
+      contents: write
+      issues: write
+    env:
+      BRANCH: ${{ needs.authorize.outputs.branch }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Checkout release branch
+        run: |
+          git checkout "$BRANCH"
+
+      - name: Create and Push Tag
+        env:
+          VERSION: ${{ needs.authorize.outputs.version }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CHANGELOG=$(echo "$ISSUE_BODY" | awk '/^## Changelog/ {found=1; next} found && /^```markdown/ {in_block=1; next} in_block && /^```/ {in_block=0; found=0} in_block {print}')
+          if [ -z "$CHANGELOG" ]; then
+            gh issue comment "$ISSUE_NUMBER" --body "❌ Failed to create release tag \`$VERSION\`: No changelog found in the issue description. Make sure the issue has the Markdown block under \`## Changelog\`."
+            exit 1
+          fi
+          
+          git config --global user.name "kueue-release-bot"
+          git config --global user.email "kueue-release-bot@kubernetes.io"
+          
+          NOTES_FILE=$(mktemp)
+          echo "$CHANGELOG" > "$NOTES_FILE"
+          
+          PUSH_EXIT=0
+          set +e
+          git tag -a "$VERSION" -F "$NOTES_FILE" 2> err.log
+          TAG_EXIT=$?
+          if [ $TAG_EXIT -eq 0 ]; then
+            git push origin "$VERSION" 2>> err.log
+            PUSH_EXIT=$?
+          fi
+          set -e
+          rm -f "$NOTES_FILE"
+          
+          if [ $TAG_EXIT -ne 0 ] || [ $PUSH_EXIT -ne 0 ]; then
+            ERR_MSG=$(cat err.log)
+            gh issue comment "$ISSUE_NUMBER" --body "❌ Failed to create or push release tag \`$VERSION\`.
+            
+            **Error details:**
+            \`\`\`text
+            ${ERR_MSG}
+            \`\`\`"
+            exit 1
+          fi
+          
+          gh issue comment "$ISSUE_NUMBER" --body "✅ Release tag \`$VERSION\` has been successfully created and pushed."
