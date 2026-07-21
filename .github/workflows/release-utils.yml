@@ -22,11 +22,18 @@ jobs:
       branch: ${{ steps.parse.outputs.branch }}
       changelog: ${{ steps.parse.outputs.changelog }}
       target: ${{ steps.parse.outputs.target }}
+      comment_link: ${{ steps.comment.outputs.comment_link }}
+      action_link: ${{ steps.metadata.outputs.action_link }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      - name: Generate Action Link
+        id: metadata
+        run: |
+          echo "action_link=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> "$GITHUB_OUTPUT"
 
       - name: Verify Actor Authorization
         env:
@@ -105,6 +112,27 @@ jobs:
             echo "${EOF_DELIM}"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Initialize Action Comment
+        id: comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          COMMAND: ${{ steps.parse.outputs.command }}
+          ACTOR: ${{ github.actor }}
+          ACTION_LINK: ${{ steps.metadata.outputs.action_link }}
+        run: |
+          if [ -z "$COMMAND" ]; then
+            echo "No valid command parsed, skipping comment initialization."
+            exit 0
+          fi
+          
+          # Import commenting functions
+          . ./hack/releasing/comment-helper.sh
+          
+          # Initialize the action comment on the GitHub issue and capture the URL
+          COMMENT_LINK=$(init_message)
+          echo "comment_link=$COMMENT_LINK" >> "$GITHUB_OUTPUT"
+
   sync-notes:
     name: Sync Release Notes
     runs-on: ubuntu-latest
@@ -113,6 +141,11 @@ jobs:
     permissions:
       contents: read
       issues: write
+    env:
+      COMMENT_LINK: ${{ needs.authorize.outputs.comment_link }}
+      COMMAND: ${{ needs.authorize.outputs.command }}
+      ACTOR: ${{ github.actor }}
+      ACTION_LINK: ${{ needs.authorize.outputs.action_link }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -140,7 +173,9 @@ jobs:
           git config --global user.name "kueue-release-bot"
           git config --global user.email "kueue-release-bot@kubernetes.io"
           yes y | ./hack/releasing/sync-notes.sh "$VERSION"
-          gh issue comment "$ISSUE_NUMBER" --body "✅ Release notes for version $VERSION have been synced."
+          
+          . ./hack/releasing/comment-helper.sh
+          finalize_message "✅ Release notes for version $VERSION have been synced."
 
   create-release-branch:
     name: Create Release Branch
@@ -150,6 +185,11 @@ jobs:
     permissions:
       contents: write
       issues: write
+    env:
+      COMMENT_LINK: ${{ needs.authorize.outputs.comment_link }}
+      COMMAND: ${{ needs.authorize.outputs.command }}
+      ACTOR: ${{ github.actor }}
+      ACTION_LINK: ${{ needs.authorize.outputs.action_link }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -165,11 +205,12 @@ jobs:
           VERSION: ${{ needs.authorize.outputs.version }}
           BRANCH: ${{ needs.authorize.outputs.branch }}
         run: |
+          . ./hack/releasing/comment-helper.sh
           # Block patch releases
           if [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.([0-9]+)$ ]]; then
             PATCH="${BASH_REMATCH[1]}"
             if [ "$PATCH" != "0" ]; then
-              gh issue comment "$ISSUE_NUMBER" --body "❌ Release branch creation is only supported for major and minor releases (vX.Y.0). Patch releases like \`$VERSION\` do not require a new release branch."
+              finalize_message "❌ Release branch creation is only supported for major and minor releases (vX.Y.0). Patch releases like \`$VERSION\` do not require a new release branch."
               exit 0
             fi
           fi
@@ -181,7 +222,7 @@ jobs:
 
           # Check if branch already exists
           if git ls-remote --heads origin "$BRANCH" | grep -q "refs/heads/$BRANCH"; then
-            gh issue comment "$ISSUE_NUMBER" --body "✅ Release branch \`$BRANCH\` already exists."
+            finalize_message "✅ Release branch \`$BRANCH\` already exists."
             exit 0
           fi
 
@@ -197,7 +238,7 @@ jobs:
 
           if [ $BRANCH_EXIT -ne 0 ] || [ $PUSH_EXIT -ne 0 ]; then
             ERR_MSG=$(cat err.log)
-            gh issue comment "$ISSUE_NUMBER" --body "❌ Failed to create release branch \`$BRANCH\`.
+            finalize_message "❌ Failed to create release branch \`$BRANCH\`.
           
             **Error details:**
             \`\`\`text
@@ -206,7 +247,7 @@ jobs:
             exit 1
           fi
 
-          gh issue comment "$ISSUE_NUMBER" --body "✅ Release branch \`$BRANCH\` has been successfully created from \`main\`."
+          finalize_message "✅ Release branch \`$BRANCH\` has been successfully created from \`main\`."
 
   wait-for-images:
     name: Wait for Images
@@ -218,6 +259,11 @@ jobs:
     permissions:
       contents: read
       issues: write
+    env:
+      COMMENT_LINK: ${{ needs.authorize.outputs.comment_link }}
+      COMMAND: ${{ needs.authorize.outputs.command }}
+      ACTOR: ${{ github.actor }}
+      ACTION_LINK: ${{ needs.authorize.outputs.action_link }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -234,6 +280,7 @@ jobs:
           VERSION: ${{ needs.authorize.outputs.version }}
           COMMAND: ${{ needs.authorize.outputs.command }}
         run: |
+          . ./hack/releasing/comment-helper.sh
           # Initialize an empty array for arguments
           ARGS=()
           
@@ -262,7 +309,7 @@ jobs:
             # If an explicit script error message was found, comment and exit cleanly (0),
             if [ -n "$ERROR_LINE" ]; then
               echo "${ERROR_LINE}" >> comment.md
-              gh issue comment "$ISSUE_NUMBER" --body-file comment.md
+              finalize_message comment.md
               exit 0
             fi
           
@@ -273,9 +320,7 @@ jobs:
           # Extract from the LAST "Images:" block to the end of the file.
           # Format it cleanly as a Markdown code block inside the issue comment.
           awk '/^Images:/ { out = ""; flag = 1 } flag { out = out $0 "\n" } END { printf "### Images Ready\n```text\n%s```", out }' output.log > comment.md
-          
-          # Post the parsed comment to the GitHub issue.
-          gh issue comment "$ISSUE_NUMBER" --body-file comment.md
+          finalize_message comment.md
 
   tag-release:
     name: Tag Release
@@ -289,6 +334,10 @@ jobs:
       BRANCH: ${{ needs.authorize.outputs.branch }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
       CHANGELOG: ${{ needs.authorize.outputs.changelog }}
+      COMMENT_LINK: ${{ needs.authorize.outputs.comment_link }}
+      COMMAND: ${{ needs.authorize.outputs.command }}
+      ACTOR: ${{ github.actor }}
+      ACTION_LINK: ${{ needs.authorize.outputs.action_link }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -304,8 +353,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CHANGELOG: ${{ needs.authorize.outputs.changelog }}
         run: |
+          . ./hack/releasing/comment-helper.sh
           if [ -z "$CHANGELOG" ]; then
-            gh issue comment "$ISSUE_NUMBER" --body "❌ Failed to create release tag \`$VERSION\`: No changelog found in the issue description. Make sure the issue has the Markdown block under \`## Changelog\`."
+            finalize_message "❌ Failed to create release tag \`$VERSION\`: No changelog found in the issue description. Make sure the issue has the Markdown block under \`## Changelog\`."
             exit 1
           fi
           
@@ -340,7 +390,7 @@ jobs:
           
           if [ $TAG_EXIT -ne 0 ] || [ $PUSH_EXIT -ne 0 ]; then
             ERR_MSG=$(cat err.log)
-            gh issue comment "$ISSUE_NUMBER" --body "❌ Failed to create or push release tag \`$VERSION\`.
+            finalize_message "❌ Failed to create or push release tag \`$VERSION\`.
             
             **Error details:**
             \`\`\`text
@@ -355,7 +405,7 @@ jobs:
             ACTION="updated"
           fi
           
-          gh issue comment "$ISSUE_NUMBER" --body "✅ Release tag \`$VERSION\` has been successfully ${ACTION}."
+          finalize_message "✅ Release tag \`$VERSION\` has been successfully ${ACTION}."
 
   create-draft-release:
     name: Create Draft Release
@@ -365,6 +415,11 @@ jobs:
     permissions:
       contents: write
       issues: write
+    env:
+      COMMENT_LINK: ${{ needs.authorize.outputs.comment_link }}
+      COMMAND: ${{ needs.authorize.outputs.command }}
+      ACTOR: ${{ github.actor }}
+      ACTION_LINK: ${{ needs.authorize.outputs.action_link }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -392,6 +447,7 @@ jobs:
           TARGET_REPO: ${{ github.repository }}
           CHANGELOG: ${{ needs.authorize.outputs.changelog }}
         run: |
+          . ./hack/releasing/comment-helper.sh
           ACTION="created"
 
           # Check if a release for this version already exists (draft or published).
@@ -401,7 +457,7 @@ jobs:
           if [ "$RELEASE_STATE" = "published" ]; then
             BODY="⚠️ Release \`$VERSION\` is already published. Skipping draft release creation to avoid overwriting a live release."
             echo "$BODY"
-            gh issue comment "$ISSUE_NUMBER" --body "$BODY"
+            finalize_message "$BODY"
             exit 0
           elif [ "$RELEASE_STATE" = "draft" ]; then
             echo "Draft release \`$VERSION\` already exists. Deleting it first to perform a clean update..."
@@ -425,7 +481,7 @@ jobs:
           if [ $RELEASE_EXIT -ne 0 ]; then
             ERR_MSG="$(cat err.log)"
             echo "$ERR_MSG"
-            gh issue comment "$ISSUE_NUMBER" --body "❌ Failed to create draft release \`$VERSION\`.
+            finalize_message "❌ Failed to create draft release \`$VERSION\`.
 
             **Error details:**
             \`\`\`text
@@ -437,7 +493,7 @@ jobs:
           # Post a comment to the GitHub issue.
           BODY="✅ Draft release has been successfully ${ACTION}."
           echo "$BODY"
-          gh issue comment "$ISSUE_NUMBER" --body "$BODY"
+          finalize_message "$BODY"
 
   prepare-pull:
     name: Prepare Pull
@@ -448,6 +504,11 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
+    env:
+      COMMENT_LINK: ${{ needs.authorize.outputs.comment_link }}
+      COMMAND: ${{ needs.authorize.outputs.command }}
+      ACTOR: ${{ github.actor }}
+      ACTION_LINK: ${{ needs.authorize.outputs.action_link }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -478,6 +539,7 @@ jobs:
           GITHUB_USER: ${{ github.repository_owner }}
           UPSTREAM_REMOTE: origin
         run: |
+          . ./hack/releasing/comment-helper.sh
           set +e
           yes y | ./hack/releasing/prepare_pull.sh --target "$TARGET" "$VERSION" 2>&1 | tee /tmp/prepare-pull.log
           SCRIPT_EXIT_CODE=${PIPESTATUS[1]}
@@ -489,7 +551,7 @@ jobs:
             if [ -z "$ERR_MSG" ]; then
               ERR_MSG="Check workflow logs for details."
             fi
-            gh issue comment "$ISSUE_NUMBER" --body "❌ Failed to prepare pull requests for version \`$VERSION\` (target: \`$TARGET\`).
+            finalize_message "❌ Failed to prepare pull requests for version \`$VERSION\` (target: \`$TARGET\`).
             
             **Error details:**
             \`\`\`text
@@ -498,7 +560,7 @@ jobs:
             exit $SCRIPT_EXIT_CODE
           fi
 
-          gh issue comment "$ISSUE_NUMBER" --body "✅ Successfully prepared pull request(s) for version \`$VERSION\` (target: \`$TARGET\`)."
+          finalize_message "✅ Successfully prepared pull request(s) for version \`$VERSION\` (target: \`$TARGET\`)."
 
   publish-release:
     name: Publish Release
@@ -508,6 +570,11 @@ jobs:
     permissions:
       contents: write
       issues: write
+    env:
+      COMMENT_LINK: ${{ needs.authorize.outputs.comment_link }}
+      COMMAND: ${{ needs.authorize.outputs.command }}
+      ACTOR: ${{ github.actor }}
+      ACTION_LINK: ${{ needs.authorize.outputs.action_link }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -523,6 +590,7 @@ jobs:
           VERSION: ${{ needs.authorize.outputs.version }}
           COMMAND: ${{ needs.authorize.outputs.command }}
         run: |
+          . ./hack/releasing/comment-helper.sh
           # Check the current state of the release.
           RELEASE_STATE=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts=false --json tagName,isDraft 2>/dev/null | \
             jq -r --arg ver "$VERSION" '.[] | select(.tagName == $ver) | if .isDraft then "draft" else "published" end')
@@ -530,12 +598,12 @@ jobs:
           if [ "$RELEASE_STATE" = "published" ]; then
             BODY="⚠️ Release \`$VERSION\` is already published."
             echo "$BODY"
-            gh issue comment "$ISSUE_NUMBER" --body "$BODY"
+            finalize_message "$BODY"
             exit 0
           elif [ -z "$RELEASE_STATE" ]; then
             BODY="❌ Release \`$VERSION\` not found. Please create a draft release first using \`/create-draft-release\`."
             echo "$BODY"
-            gh issue comment "$ISSUE_NUMBER" --body "$BODY"
+            finalize_message "$BODY"
             exit 1
           fi
 
@@ -550,7 +618,7 @@ jobs:
           if [ $EDIT_EXIT -ne 0 ]; then
             ERR_MSG="$(cat err.log)"
             echo "$ERR_MSG"
-            gh issue comment "$ISSUE_NUMBER" --body "❌ Failed to publish release \`$VERSION\`.
+            finalize_message "❌ Failed to publish release \`$VERSION\`.
 
             **Error details:**
             \`\`\`text
@@ -560,5 +628,5 @@ jobs:
           fi
 
           if [ "$COMMAND" != "create-release-candidate" ]; then
-            gh issue comment "$ISSUE_NUMBER" --body "✅ Release \`$VERSION\` has been successfully published."
+            finalize_message "✅ Release \`$VERSION\` has been successfully published."
           fi
