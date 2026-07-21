@@ -1,0 +1,96 @@
+github.com
+  ✓ Logged in to github.com account github-actions[bot] (GH_TOKEN)
+  - Active account: true
+  - Git operations protocol: https
+  - Token: ghs_15368_*******************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************
++++ Updating remotes...
+Fetching origin
+Latest release version is 
++++ Creating local branch prepare-release-0.17-1784628310
+Switched to a new branch 'prepare-release-0.17-1784628310'
+branch 'prepare-release-0.17-1784628310' set up to track 'origin/release-0.17'.
+→ Downloading tools dependencies...
+cd /home/runner/work/kueue/kueue/hack/tools && /home/runner/work/kueue/kueue/hack/testing/retry.sh --attempts 7 --delay 2 --exponential --stream -- env go mod download
+retry [1/7]: env go mod download
+make-timing: started=2026-07-21T10:05:12Z finished=2026-07-21T10:05:43Z status=0 duration=31s command=cd /home/runner/work/kueue/kueue/hack/tools && /home/runner/work/kueue/kueue/hack/testing/retry.sh --attempts 7 --delay 2 --exponential --stream -- env go mod download
+retry [1/7]: env GOBIN=/home/runner/work/kueue/kueue/bin GO111MODULE=on go install github.com/mikefarah/yq/v4@v4.53.3
+go: downloading golang.org/x/text v0.37.0
+go: downloading github.com/mattn/go-isatty v0.0.20
+go: downloading github.com/agext/levenshtein v1.2.1
+go: downloading github.com/google/go-cmp v0.6.0
+go: downloading golang.org/x/sys v0.45.0
+make-timing: started=2026-07-21T10:05:43Z finished=2026-07-21T10:06:09Z status=0 duration=26s command=/home/runner/work/kueue/kueue/hack/testing/retry.sh --attempts 7 --delay 2 --exponential --stream -- env GOBIN=/home/runner/work/kueue/kueue/bin GO111MODULE=on go install github.com/mikefarah/yq/v4@v4.53.3
+retry [1/7]: env GOBIN=/home/runner/work/kueue/kueue/bin GO111MODULE=on go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
+go: downloading github.com/spf13/cobra v1.9.1
+go: downloading github.com/spf13/pflag v1.0.6
+go: downloading sigs.k8s.io/yaml v1.5.0
+go: downloading golang.org/x/text v0.28.0
+go: downloading github.com/go-errors/errors v1.4.2
+go: downloading github.com/davecgh/go-spew v1.1.1
+go: downloading go.yaml.in/yaml/v2 v2.4.2
+go: downloading go.yaml.in/yaml/v3 v3.0.3
+go: downloading k8s.io/kube-openapi v0.0.0-20241212222426-2c72e554b1e7
+go: downloading github.com/google/gnostic-models v0.6.9
+go: downloading google.golang.org/protobuf v1.36.5
+go: downloading github.com/go-openapi/jsonreference v0.20.2
+go: downloading github.com/go-openapi/swag v0.23.0
+go: downloading github.com/go-openapi/jsonpointer v0.21.0
+go: downloading github.com/mailru/easyjson v0.7.7
+make-timing: started=2026-07-21T10:06:10Z finished=2026-07-21T10:06:20Z status=0 duration=10s command=/home/runner/work/kueue/kueue/hack/testing/retry.sh --attempts 7 --delay 2 --exponential --stream -- env GOBIN=/home/runner/work/kueue/kueue/bin GO111MODULE=on go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
+/usr/bin/sed -r 's/v[0-9]+\.[0-9]+\.[0-9]+/v0.17.8/g' -i README.md -i site/hugo.toml -i cmd/kueueviz/INSTALL.md
+/usr/bin/sed -r 's/chart_version = "[0-9]+\.[0-9]+\.[0-9]+/chart_version = "0.17.8/g' -i README.md -i site/hugo.toml
+/usr/bin/sed -r 's/--version="[0-9]+\.[0-9]+\.[0-9]+/--version="0.17.8/g' -i charts/kueue/README.md.gotmpl -i cmd/kueueviz/INSTALL.md
+/usr/bin/sed -r 's/[0-9]+\.[0-9]+\.[0-9]+/0.17.8/g' -i charts/kueue/README.md
+/home/runner/work/kueue/kueue/bin/yq e '.appVersion = "v0.17.8" | .version = "0.17.8"' -i charts/kueue/Chart.yaml
+make-timing: started=2026-07-21T10:06:20Z finished=2026-07-21T10:06:21Z status=0 duration=1s command=/home/runner/work/kueue/kueue/bin/yq e '.appVersion = "v0.17.8" | .version = "0.17.8"' -i charts/kueue/Chart.yaml
+/home/runner/work/kueue/kueue/bin/yq e '.controllerManager.manager.image.tag = "release-0.17" | .kueueViz.backend.image.tag = "release-0.17" | .kueueViz.frontend.image.tag = "release-0.17"' -i charts/kueue/values.yaml
+/home/runner/work/kueue/kueue/bin/yq e '.version = "0.17.8"' -i cmd/kueueviz/frontend/package.json
+/home/runner/work/kueue/kueue/bin/yq e '.version = "0.17.8" | .packages[""].version = "0.17.8"' -i cmd/kueueviz/frontend/package-lock.json
+/home/runner/work/kueue/kueue/bin/yq e '.version = "0.17.8"' -i test/e2e/kueueviz/package.json
+/home/runner/work/kueue/kueue/bin/yq e '.version = "0.17.8" | .packages[""].version = "0.17.8"' -i test/e2e/kueueviz/package-lock.json
+# Update kueue-populator chart version and image tag
+/home/runner/work/kueue/kueue/bin/yq e '.appVersion = "v0.17.8" | .version = "0.17.8" | .dependencies[0].version = "~0.17.8"' -i cmd/experimental/kueue-populator/charts/kueue-populator/Chart.yaml
+/home/runner/work/kueue/kueue/bin/yq e '.kueuePopulator.image.tag = "release-0.17"' -i cmd/experimental/kueue-populator/charts/kueue-populator/values.yaml
+/usr/bin/sed -r 's/[0-9]+\.[0-9]+\.[0-9]+/0.17.8/g' -i cmd/experimental/kueue-populator/README.md -i cmd/experimental/kueue-populator/charts/kueue-populator/README.md
+# Update kueue-priority-booster chart version and image tag
+/home/runner/work/kueue/kueue/bin/yq e '.appVersion = "v0.17.8" | .version = "0.17.8" | .dependencies[0].version = "~0.17.8"' -i cmd/experimental/kueue-priority-booster/charts/kueue-priority-booster/Chart.yaml
+/home/runner/work/kueue/kueue/bin/yq e '.kueuePriorityBooster.image.tag = "release-0.17"' -i cmd/experimental/kueue-priority-booster/charts/kueue-priority-booster/values.yaml
+/usr/bin/sed -r 's/[0-9]+\.[0-9]+\.[0-9]+/0.17.8/g' -i cmd/experimental/kueue-priority-booster/README.md
+make generate-helm-docs
+make[1]: Entering directory '/home/runner/work/kueue/kueue'
+make-timing: started=2026-07-21T10:06:21Z finished=2026-07-21T10:06:21Z status=1 duration=0s command=command -v gsed 2>/dev/null
+make-timing: started=2026-07-21T10:06:21Z finished=2026-07-21T10:06:22Z status=0 duration=1s command=go list ./... | grep -v '/test/'
+→ Downloading tools dependencies...
+cd /home/runner/work/kueue/kueue/hack/tools && /home/runner/work/kueue/kueue/hack/testing/retry.sh --attempts 7 --delay 2 --exponential --stream -- env go mod download
+retry [1/7]: env go mod download
+retry [1/7]: env GOBIN=/home/runner/work/kueue/kueue/bin CGO_ENABLED=1 go install github.com/norwoodj/helm-docs/cmd/helm-docs@v1.14.2
+go: downloading github.com/sirupsen/logrus v1.9.3
+go: downloading github.com/spf13/cobra v1.8.1
+go: downloading github.com/spf13/viper v1.16.0
+go: downloading github.com/Masterminds/sprig/v3 v3.2.3
+go: downloading helm.sh/helm/v3 v3.15.2
+go: downloading golang.org/x/sys v0.18.0
+go: downloading github.com/fsnotify/fsnotify v1.6.0
+go: downloading github.com/mitchellh/mapstructure v1.5.0
+go: downloading github.com/spf13/afero v1.9.5
+go: downloading github.com/spf13/cast v1.5.1
+go: downloading github.com/spf13/jwalterweatherman v1.1.0
+go: downloading github.com/spf13/pflag v1.0.5
+go: downloading github.com/Masterminds/semver/v3 v3.2.1
+go: downloading github.com/google/uuid v1.3.0
+go: downloading github.com/huandu/xstrings v1.4.0
+go: downloading github.com/imdario/mergo v0.3.13
+go: downloading github.com/shopspring/decimal v1.3.1
+go: downloading golang.org/x/crypto v0.21.0
+go: downloading golang.org/x/text v0.14.0
+go: downloading github.com/subosito/gotenv v1.4.2
+go: downloading github.com/hashicorp/hcl v1.0.0
+go: downloading gopkg.in/ini.v1 v1.67.0
+go: downloading github.com/magiconair/properties v1.8.7
+go: downloading github.com/pelletier/go-toml/v2 v2.0.8
+make-timing: started=2026-07-21T10:06:23Z finished=2026-07-21T10:06:28Z status=0 duration=5s command=/home/runner/work/kueue/kueue/hack/testing/retry.sh --attempts 7 --delay 2 --exponential --stream -- env GOBIN=/home/runner/work/kueue/kueue/bin CGO_ENABLED=1 go install github.com/norwoodj/helm-docs/cmd/helm-docs@v1.14.2
+/home/runner/work/kueue/kueue/bin/helm-docs -c /home/runner/work/kueue/kueue/charts/kueue
+time="2026-07-21T10:06:28Z" level=info msg="Found Chart directories [.]"
+time="2026-07-21T10:06:28Z" level=info msg="Generating README Documentation for chart /home/runner/work/kueue/kueue/charts/kueue"
+make[1]: Leaving directory '/home/runner/work/kueue/kueue'
+make-timing: started=2026-07-21T10:06:21Z finished=2026-07-21T10:06:28Z status=0 duration=7s command=make generate-helm-docs
