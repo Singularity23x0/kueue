@@ -7,7 +7,7 @@ description: >
 ---
 
 Kueue's admission process determines whether a Workload can begin execution.
-Admission may also be subject to the [admission gate mechanism](/v0.17/docs/reference/labels-and-annotations/#kueuex-k8sioadmission-gated-by) which is currently in alpha.
+Admission may also be subject to the [admission gate mechanism](/v0.17/docs/reference/labels-and-annotations/#kueuex-k8sioadmission-gated-by) which is in beta and enabled by default.
 
 It involves verifying:
 - logical resource availability via quota reservation
@@ -16,7 +16,7 @@ It involves verifying:
 
 Kueue implements this through a two-phase admission cycle: 
 
-1. **Quota Reservation:** When a user submits a Workload, it enters a LocalQueue first. This LocalQueue points to a ClusterQueue which is responsible for managing the available resources. The Kueue checks if the targeted ClusterQueue's available quota and resource flavors can accomodate requested resources (CPU, memory, GPUs, etc.). If the quota is available, the Kueue reserves resources for this Workload and prevents other Workloads from using the same resources. This phase also includes checking the availability of physical resources when 
+1. **Quota Reservation:** When a user submits a Workload, it enters a LocalQueue first. This LocalQueue points to a ClusterQueue which is responsible for managing the available resources. The Kueue checks if the targeted ClusterQueue's available quota and resource flavors can accommodate requested resources (CPU, memory, GPUs, etc.). If the quota is available, the Kueue reserves resources for this Workload and prevents other Workloads from using the same resources. This phase also includes checking the availability of physical resources when 
     Topology-Aware Scheduling is enabled.
 
 2. **Admission Checks:** Await for [AdmissionChecks](/v0.17/docs/concepts/admission_check) configured in the ClusterQueue. Checks can be either built-in such as [MultiKueue](/v0.17/docs/concepts/multikueue/) or [ProvisioningRequest](/v0.17/docs/concepts/admission_check/provisioning_request/), or user-created plugins.

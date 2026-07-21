@@ -18,4 +18,6 @@ You can use AppWrapper, job-based workloads and pod-based workloads.
 - [Run a Flux Miniclusters using job integration](/v0.17/docs/tasks/run/external_workloads/flux_miniclusters).
 - [Run an Argo Workflow using pod integration](/v0.17/docs/tasks/run/external_workloads/argo_workflow).
 - [Run a tekton cd pipeline using pod integration](/v0.17/docs/tasks/run/external_workloads/tektoncd)
+- [Run a Sandbox using pod integration](/v0.17/docs/tasks/run/external_workloads/sandbox)
+- [Run Spark with spark-submit using pod integration](/v0.17/docs/tasks/run/external_workloads/spark_submit_plain_pod)
 

@@ -51,8 +51,6 @@ To create a Kubeconfig that can be used in the manager cluster to delegate Jobs 
 {{% alert title="Security Notice" color="primary" %}}
 
 MultiKueue validates kubeconfig files to protect against known arbitrary code execution vulnerabilities.
-For your security, it is strongly recommended not to use the MultiKueueAllowInsecureKubeconfigs flag.
-This flag was introduced in Kueue v0.15.0 solely for backward compatibility and will be deprecated in Kueue v0.17.0.
 
 {{% /alert %}}
 
@@ -85,6 +83,42 @@ For the next example, having the `worker1` cluster Kubeconfig stored in a file c
 ```
 
 Check the [worker](#multikueue-specific-kubeconfig) section for details on Kubeconfig generation.
+
+### (Optional) Enable `locationType=Path` for kubeconfig files
+
+{{% alert title="Security Notice" color="warning" %}}
+`locationType=Path` path validation is an **alpha feature** (disabled by default).
+In production, use `locationType=Secret` or `ClusterProfile` instead.
+{{% /alert %}}
+
+The `MultiKueueKubeConfigPathValidation` feature gate (alpha, disabled by default)
+restricts kubeconfig file paths to the hardcoded prefix
+`/etc/multikueue/kubeconfigs/`. When enabled, the controller will:
+
+- Reject empty or relative paths.
+- Reject paths containing `..` segments after cleaning.
+- Resolve symlinks and reject any path that resolves outside the prefix.
+
+To enable this validation, set the feature gate:
+
+```
+--feature-gates=MultiKueueKubeConfigPathValidation=true
+```
+
+To use a path-based kubeconfig, mount the file into the controller pod under
+`/etc/multikueue/kubeconfigs/` and reference it in the `MultiKueueCluster`:
+
+```yaml
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: MultiKueueCluster
+metadata:
+  name: worker1
+spec:
+  clusterSource:
+    kubeConfig:
+      locationType: Path
+      location: /etc/multikueue/kubeconfigs/worker1.kubeconfig
+```
 
 ### Create a sample setup
 
@@ -248,7 +282,7 @@ The access provider defined in `ClusterProfile` depends upon an executable plugi
 Kueue controller manager pods running within the MultiKueue manager cluster.
 It's the responsibility of the Kueue administrator to make sure that the required command is available.
 
-An example plugin can be found [here](https://github.com/kubernetes-sigs/cluster-inventory-api/tree/445319b6307a88778b930e154ed3e2f38d85a689/cmd/secretreader-plugin) (secret reader) or [here](https://cloud.google.com/blog/products/containers-kubernetes/kubectl-auth-changes-in-gke) (Google Cloud Platform).
+An example plugin can be found [here](https://github.com/kubernetes-sigs/cluster-inventory-api/tree/v0.1.3/plugins/secretreader) (secret reader) or [here](https://cloud.google.com/blog/products/containers-kubernetes/kubectl-auth-changes-in-gke) (Google Cloud Platform).
 
 #### Mount the executable with `initContainers`
 
@@ -326,7 +360,7 @@ and can be called analogously to the `initContainers` approach (`/plugins/<plugi
 Alternatively, a custom Kueue manager image can be built to include the plugin executable.
 The image reference in the Kueue manager deployment should then point to the user-managed custom image.
 
-### Define the credentials provider in the Kueue manager config
+### Define the access provider in the Kueue manager config
 
 To connect the access providers specified in the `ClusterProfile`s with the mounted plugin,
 an entry within the Kueue configuration has to be created:
@@ -338,7 +372,7 @@ data:
     ...
     multiKueue:
       clusterProfile:
-        credentialsProviders:
+        accessProviders:
         - name: <access-provider-name>
           execConfig:
             apiVersion: client.authentication.k8s.io/v1beta1
@@ -360,6 +394,12 @@ It has to match the `accessProviders` name in the relevant `ClusterProfile`s.
 
 This definition will configure the `ClusterProfile`s using the `access-provider-name` to retrieve
 cluster credentials via the `plugin-command` executable.
+
+{{% alert title="Note" color="primary" %}}
+
+The previous Kueue configuration field name, `credentialsProviders`, is deprecated. Use `accessProviders` for new configurations. Do not configure both fields at the same time.
+
+{{% /alert %}}
 
 ### Link `MultiKueueCluster` objects to their corresponding `ClusterProfile`
 

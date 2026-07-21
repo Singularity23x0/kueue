@@ -2,14 +2,14 @@
 type: docs
 params:
   docs_minor: v0.17
-  version: v0.17.7
-  chart_version: 0.17.7
+  version: v0.18.2
+  chart_version: 0.18.2
 cascade:
   type: docs
   params:
     docs_minor: v0.17
-    version: v0.17.7
-    chart_version: 0.17.7
+    version: v0.18.2
+    chart_version: 0.18.2
 title: "文档"
 linkTitle: "文档"
 weight: 20

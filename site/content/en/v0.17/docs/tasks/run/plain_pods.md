@@ -22,32 +22,7 @@ This guide is for [batch users](/v0.17/docs/tasks#batch-user) that have a basic 
    and enable the `pod` integration.
 
    To allow Kubernetes system pods to be successfully scheduled, you must limit the scope of the `pod` integration.
-   The recomended mechanism for doing this is using the `managedJobsNamespaceSelector`.
-
-   One approach is to only enable management only for specific namespaces:
-   ```yaml
-   apiVersion: config.kueue.x-k8s.io/v1beta2
-   kind: Configuration
-   managedJobsNamespaceSelector:
-     matchLabels:
-      kueue-managed: "true"
-   integrations:
-     frameworks:
-      - "pod"
-   ```
-   An alternate approach is to exempt system namespaces from management:
-   ```yaml
-   apiVersion: config.kueue.x-k8s.io/v1beta2
-   kind: Configuration
-   managedJobsNamespaceSelector:
-      matchExpressions:
-      - key: kubernetes.io/metadata.name
-        operator: NotIn
-        values: [ kube-system, kueue-system ]
-   integrations:
-     frameworks:
-      - "pod"
-   ```
+   On production environments it is recommended [to use the `managedJobsNamespaceSelector`](/v0.17/docs/tasks/manage/enforce_job_management/opt_in_namespace_management).
 
 {{% alert title="Note" color="primary" %}}
   Prior to Kueue v0.10, the Configuration fields `integrations.podOptions.namespaceSelector`
@@ -104,7 +79,12 @@ The resource needs of the workload can be configured in the `spec.containers`.
 
 Kueue will inject the `kueue.x-k8s.io/managed=true` label to indicate which pods are managed by it.
 
-### d. Limitations
+### d. Scheduling Gates
+
+Kueue injects the `kueue.x-k8s.io/admission` scheduling gate to the Pods that Kueue is managing.
+Once the corresponding Workload is admitted, Kueue will patch the pods and remove this scheduling gate.
+
+### e. Limitations
 
 - A Kueue managed Pod cannot be created in `kube-system` or `kueue-system` namespaces.
 - In case of [preemption](/v0.17/docs/concepts/cluster_queue/#preemption), the Pod will

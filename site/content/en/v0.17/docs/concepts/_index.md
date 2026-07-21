@@ -59,6 +59,10 @@ in a data center. A `Topology` defines levels of organizational units
 A mechanism allowing to schedule Workloads optimizing Pod placement for
 network throughput between the Pods.
 
+### [Dynamic Resource Allocation](/v0.17/docs/concepts/dynamic_resource_allocation)
+
+Quota management for workloads using Kubernetes
+[Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/).
 
 ## Glossary
 

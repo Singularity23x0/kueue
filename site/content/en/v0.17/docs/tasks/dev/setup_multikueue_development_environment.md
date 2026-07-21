@@ -12,15 +12,21 @@ Check the concepts section for a [MultiKueue overview](/v0.17/docs/concepts/mult
 
 ## Setup MultiKueue with E2E Test Cluster
 
-The [e2e test development mode](/v0.17/docs/contribution_guidelines/testing/#dev-mode-recommended) can be used to maintain a MultiKueue cluster setup and run end-to-end tests
+The [e2e test development mode](/community/contribution_guidelines/testing/#dev-mode-keep-the-cluster) can be used to maintain a MultiKueue cluster setup and run end-to-end tests
 against it without recreating and tearing it down each time.
 
 For example:
 ```sh
-E2E_MODE=dev make kind-image-build test-multikueue-e2e
+E2E_MODE=dev make kind-image-build test-multikueue-e2e-baseline
 ```
 
-For more information about the DEV mode, refer to the testing documentation.
+To use a staging Kueue image without building (no `kind-image-build` needed), pass `IMAGE_TAG` with the `main` tag:
+
+```sh
+E2E_MODE=dev IMAGE_TAG=us-central1-docker.pkg.dev/k8s-staging-images/kueue/kueue:main make test-multikueue-e2e-baseline
+```
+
+For using a released version (with matching manifests) and for more information about the DEV mode, refer to the [testing documentation](/community/contribution_guidelines/testing/#dev-mode-keep-the-cluster).
 
 ## Setup MultiKueue with TAS
 
@@ -135,14 +141,14 @@ data:
       groupKindConcurrency:
         Job.batch: 5
         Pod: 5
-        Workload.kueue.x-k8s.io: 5
-        LocalQueue.kueue.x-k8s.io: 1
+        Workload.kueue.x-k8s.io: 10
+        LocalQueue.kueue.x-k8s.io: 5
         Cohort.kueue.x-k8s.io: 1
-        ClusterQueue.kueue.x-k8s.io: 1
+        ClusterQueue.kueue.x-k8s.io: 5
         ResourceFlavor.kueue.x-k8s.io: 1
     clientConnection:
-      qps: 50
-      burst: 100
+      qps: 300
+      burst: 500
     integrations:
       frameworks:
       - "batch/job"
@@ -182,6 +188,10 @@ for cluster in worker1 worker2; do
     --verb=get,patch,update \
     --resource=jobs.batch/status,workloads.kueue.x-k8s.io/status,pods/status
 
+  kubectl --context kind-${cluster} create clusterrole multikueue-role-queues \
+    --verb=get,list,watch \
+    --resource=clusterqueues.kueue.x-k8s.io,localqueues.kueue.x-k8s.io
+
   # Create ClusterRoleBindings
   kubectl --context kind-${cluster} create clusterrolebinding multikueue-crb \
     --clusterrole=multikueue-role \
@@ -189,6 +199,10 @@ for cluster in worker1 worker2; do
 
   kubectl --context kind-${cluster} create clusterrolebinding multikueue-crb-status \
     --clusterrole=multikueue-role-status \
+    --serviceaccount=kueue-system:${SERVICE_ACCOUNT}
+
+  kubectl --context kind-${cluster} create clusterrolebinding multikueue-crb-queues \
+    --clusterrole=multikueue-role-queues \
     --serviceaccount=kueue-system:${SERVICE_ACCOUNT}
 
   # Create a secret bound to the new service account

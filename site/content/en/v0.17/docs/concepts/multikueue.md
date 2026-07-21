@@ -45,7 +45,7 @@ creates and deletes Workloads and Jobs in the worker clusters as needed.
 
 ### Using manager to run workloads
 
-MultiKueue supports running regular Jobs regular Jobs on the manager when using 
+MultiKueue supports running regular Jobs on the manager when using 
 a dedicated ClusterQueue. However, we do not support currently role sharing where the manager
 cluster is also one of workers for itself, see [limitations](#limitations)
 
@@ -150,6 +150,31 @@ Kueue handles delegation to the appropriate worker cluster without requiring any
 
 - [Set up a MultiKueue environment](/v0.17/docs/tasks/manage/setup_multikueue/)
 - [Run Jobs in a MultiKueue environment](/v0.17/docs/tasks/run/multikueue)
+
+## Security Considerations
+
+### KubeConfig Location Types
+
+MultiKueueCluster supports three sources for cluster credentials:
+
+| Source | Recommended | Notes |
+|---|---|---|
+| `ClusterProfile` | ✅ Production | Federated credential discovery via the ClusterProfile API. |
+| `Secret` | ✅ Production | Kubeconfig stored in a Kubernetes Secret. |
+| `Path` | ⚠️ Development only | File path on the controller pod's filesystem. |
+
+**`locationType=Path` validation is available as an alpha feature.**
+The `MultiKueueKubeConfigPathValidation` feature gate (disabled by default)
+restricts kubeconfig file paths to the hardcoded prefix
+`/etc/multikueue/kubeconfigs/`. When enabled, the controller rejects paths
+containing `..`, relative paths, and symlinks that resolve outside the prefix.
+To enable this validation, set the feature gate:
+`--feature-gates=MultiKueueKubeConfigPathValidation=true`.
+
+For production deployments, use `ClusterProfile` or `Secret` instead of `Path`.
+
+See [Setup a MultiKueue environment](/v0.17/docs/tasks/manage/setup_multikueue/) for
+configuration details.
 
 ## Limitations
 

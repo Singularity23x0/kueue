@@ -122,6 +122,15 @@ rules:
 - apiGroups:
   - kueue.x-k8s.io
   resources:
+  - clusterqueues
+  - localqueues
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - kueue.x-k8s.io
+  resources:
   - workloads/status
   verbs:
   - get
@@ -237,6 +246,22 @@ rules:
   - ray.io
   resources:
   - rayclusters/status
+  verbs:
+  - get
+- apiGroups:
+  - ray.io
+  resources:
+  - rayservices
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ray.io
+  resources:
+  - rayservices/status
   verbs:
   - get
 - apiGroups:
