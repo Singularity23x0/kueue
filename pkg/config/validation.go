@@ -104,8 +104,6 @@ func Validate(c *configapi.Configuration, scheme *runtime.Scheme) field.ErrorLis
 	allErrs = append(allErrs, validateVisibilityServer(c)...)
 	allErrs = append(allErrs, validateCustomLabels(c)...)
 	allErrs = append(allErrs, validateQuotaCheckStrategy(c)...)
-	allErrs = append(allErrs, validateDRAFeatureGateDependencies()...)
-	allErrs = append(allErrs, validateFeatureGateDependency(features.UnadmittedWorkloadsExplicitStatus, features.UnadmittedWorkloadsObservability)...)
 	return allErrs
 }
 
@@ -668,14 +666,11 @@ func LoadAndValidateFeatureGates(featureGateCLI string, featureGateMap map[strin
 	if !features.Enabled(features.TopologyAwareScheduling) && enabledProfilesCount > 0 {
 		allErrs = append(allErrs, field.Invalid(featureGatesPath, enabledProfilesCount, "cannot use a TAS profile with TAS disabled"))
 	}
-	if !features.Enabled(features.TopologyAwareScheduling) && features.Enabled(features.TASHandleOverlappingFlavors) {
-		allErrs = append(allErrs, field.Invalid(featureGatesPath, features.TASHandleOverlappingFlavors,
-			fmt.Sprintf("%s requires %s to be enabled", features.TASHandleOverlappingFlavors, features.TopologyAwareScheduling)))
-	}
 
 	// TAS sub-features have no effect unless their dependencies are also enabled. All of them
 	// require TopologyAwareScheduling; TASFailedNodeReplacementFailFast and
 	// TASReplaceNodeOnPodTermination additionally require TASFailedNodeReplacement.
+	allErrs = append(allErrs, validateFeatureGateDependency(features.TASHandleOverlappingFlavors, features.TopologyAwareScheduling)...)
 	allErrs = append(allErrs, validateFeatureGateDependency(features.TASFailedNodeReplacement, features.TopologyAwareScheduling)...)
 	allErrs = append(allErrs, validateFeatureGateDependency(features.TASFailedNodeReplacementFailFast, features.TopologyAwareScheduling, features.TASFailedNodeReplacement)...)
 	allErrs = append(allErrs, validateFeatureGateDependency(features.TASReplaceNodeOnPodTermination, features.TopologyAwareScheduling, features.TASFailedNodeReplacement)...)
@@ -686,17 +681,18 @@ func LoadAndValidateFeatureGates(featureGateCLI string, featureGateMap map[strin
 	allErrs = append(allErrs, validateFeatureGateDependency(features.TASRespectNodeAffinityPreferred, features.TopologyAwareScheduling)...)
 	allErrs = append(allErrs, validateFeatureGateDependency(features.UnadmittedWorkloadsExplicitStatus, features.UnadmittedWorkloadsObservability)...)
 
-	if features.Enabled(features.ElasticJobsViaWorkloadSlicesWithTAS) {
-		if !features.Enabled(features.ElasticJobsViaWorkloadSlices) {
-			allErrs = append(allErrs, field.Invalid(featureGatesPath, "ElasticJobsViaWorkloadSlicesWithTAS", "ElasticJobsViaWorkloadSlicesWithTAS requires ElasticJobsViaWorkloadSlices to be enabled"))
-		}
-		if !features.Enabled(features.TopologyAwareScheduling) {
-			allErrs = append(allErrs, field.Invalid(featureGatesPath, "ElasticJobsViaWorkloadSlicesWithTAS", "ElasticJobsViaWorkloadSlicesWithTAS requires TopologyAwareScheduling to be enabled"))
-		}
-	}
+	allErrs = append(allErrs, validateFeatureGateDependency(features.ElasticJobsViaWorkloadSlicesWithTAS, features.ElasticJobsViaWorkloadSlices, features.TopologyAwareScheduling)...)
 
 	allErrs = append(allErrs, validateDRAFeatureGateDependencies()...)
 
+	return allErrs
+}
+
+func validateDRAFeatureGateDependencies() field.ErrorList {
+	var allErrs field.ErrorList
+	allErrs = append(allErrs, validateFeatureGateDependency(features.KueueDRAIntegrationExtendedResource, features.KueueDRAIntegration)...)
+	allErrs = append(allErrs, validateFeatureGateDependency(features.KueueDRAIntegrationPartitionableDevices, features.KueueDRAIntegration)...)
+	allErrs = append(allErrs, validateFeatureGateDependency(features.KueueDRAIntegrationConsumableCapacity, features.KueueDRAIntegration)...)
 	return allErrs
 }
 
@@ -713,37 +709,6 @@ func validateFeatureGateDependency(gate featuregate.Feature, dependencies ...fea
 				fmt.Sprintf("%s requires %s to be enabled", gate, dep)))
 		}
 	}
-	return allErrs
-}
-
-func validateDRAFeatureGateDependencies() field.ErrorList {
-	var allErrs field.ErrorList
-	if features.Enabled(features.KueueDRAIntegrationExtendedResource) {
-		if !features.Enabled(features.KueueDRAIntegration) {
-			allErrs = append(allErrs, field.Invalid(featureGatesPath, "KueueDRAIntegrationExtendedResource", "KueueDRAIntegrationExtendedResource requires KueueDRAIntegration to be enabled"))
-		}
-	}
-
-	if features.Enabled(features.KueueDRAIntegrationPartitionableDevices) {
-		if !features.Enabled(features.KueueDRAIntegration) {
-			allErrs = append(allErrs, field.Invalid(
-				featureGatesPath,
-				"KueueDRAIntegrationPartitionableDevices",
-				"KueueDRAIntegrationPartitionableDevices requires KueueDRAIntegration to be enabled",
-			))
-		}
-	}
-
-	if features.Enabled(features.KueueDRAIntegrationConsumableCapacity) {
-		if !features.Enabled(features.KueueDRAIntegration) {
-			allErrs = append(allErrs, field.Invalid(
-				featureGatesPath,
-				"KueueDRAIntegrationConsumableCapacity",
-				"KueueDRAIntegrationConsumableCapacity requires KueueDRAIntegration to be enabled",
-			))
-		}
-	}
-
 	return allErrs
 }
 
