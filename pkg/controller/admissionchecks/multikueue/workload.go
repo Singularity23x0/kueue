@@ -87,6 +87,7 @@ var (
 const syncDeferredRequeueAfter = 2 * time.Second
 
 type wlReconciler struct {
+	leaderAwareReconciler
 	client            client.Client
 	helper            *admissioncheck.MultiKueueStoreHelper
 	clusters          *clustersReconciler
@@ -182,7 +183,11 @@ func (g *wlGroup) RemoveRemoteObjects(ctx context.Context, cluster string) error
 	return nil
 }
 
-func (w *wlReconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+func (w *wlReconciler) reconcileFollower(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+	return reconcile.Result{}, nil
+}
+
+func (w *wlReconciler) reconcileLeader(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 	log.V(2).Info("Reconcile Workload")
 
@@ -1071,6 +1076,12 @@ func (w *wlReconciler) setupWithManager(mgr ctrl.Manager) error {
 			}}, w.eventsBatchPeriod)
 		},
 	}
+
+	w.configureLeaderAwareReconciliation(
+		mgr,
+		w.reconcileLeader,
+		w.reconcileFollower,
+	)
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("multikueue_workload").
