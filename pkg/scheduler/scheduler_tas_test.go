@@ -4137,6 +4137,15 @@ func (s *recordingSimulatorSnapshot) FindFeasibleNodes(
 	return feasible, nil
 }
 
+func (s *recordingSimulatorSnapshot) ScheduleWorkload(
+	ctx context.Context,
+	wlKey client.ObjectKey,
+	preemptionCandidates []client.ObjectKey,
+	preemptedWorkloads []client.ObjectKey,
+) (simulator.SchedulingResult, simulator.PreemptionResult, error) {
+	return simulator.SchedulingResult{}, simulator.PreemptionResult{}, nil
+}
+
 type tasScheduleTestConfig struct {
 	queues []kueue.LocalQueue
 	now    time.Time

@@ -6658,7 +6658,7 @@ func TestElasticTASDoesNotDoubleCountReplacedSlice(t *testing.T) {
 					PodSets(*utiltestingapi.MakePodSet(kueue.DefaultPodSetName, 4).Request(corev1.ResourceCPU, "1").UnconstrainedTopologyRequest().Obj()).
 					Obj(),
 			)
-			a := New(next, cq, bookmarkTestFlavors(), false, &testOracle{}, oldInfo, configapi.QuotaCheckBlockUndeclared, resources.NewResourceFormatter(), bookmarkTestCycle).Assign(ctx, nil)
+			a := New(next, cq, bookmarkTestFlavors(), false, &testOracle{}, oldInfo, configapi.QuotaCheckBlockUndeclared, resources.NewResourceFormatter(), bookmarkTestCycle).AssignWithTopology(ctx, nil)
 			if got := a.RepresentativeMode(); got != tc.wantMode {
 				t.Errorf("mode=%s, want %s", got, tc.wantMode)
 			}

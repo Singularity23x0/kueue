@@ -858,19 +858,50 @@ type partialAssignment struct {
 
 func (s *Scheduler) getAssignments(ctx context.Context, wl *workload.Info, snap *schdcache.Snapshot) (flavorassigner.Assignment, []*preemption.Target) {
 	cq := snap.ClusterQueue(wl.ClusterQueue)
+	log := log.FromContext(ctx)
 	// The flavor scan resumes from the progress recorded in FlavorScanState, so it has to be
 	// dropped once it no longer describes the current state. Deciding that here rather than
 	// inside the assigner keeps it to one place per Workload per cycle: the assigner runs
 	// again for each reduced pod count when partial admission is in play.
 	if wl.FlavorScanState != nil && flavorScanStateOutdated(wl.FlavorScanState, cq.AllocatableResourceGeneration, s.schedulingCycle, wl.SchedulingHash) {
-		log.FromContext(ctx).V(6).Info("Clearing Workload's flavor scan state because it was outdated",
+		log.V(6).Info("Clearing Workload's flavor scan state because it was outdated",
 			"cq.AllocatableResourceGeneration", cq.AllocatableResourceGeneration,
 			"wl.FlavorScanState.AllocatableResourceGeneration", wl.FlavorScanState.AllocatableResourceGeneration)
 		wl.FlavorScanState = nil
 	}
-	assignment, targets := s.getInitialAssignments(ctx, wl, snap)
-	updateAssignmentForTAS(ctx, snap, cq, wl, &assignment, targets)
-	return assignment, targets
+
+	// Prepare the base assignment. Include TAS topology assignment if relevant.
+	preemptionTargets, replaceableWorkloadSlice := workloadslicing.ReplacedWorkloadSlice(wl, snap)
+	flvAssigner := flavorassigner.New(
+		wl, cq, snap.ResourceFlavors, fairsharing.Enabled(s.fairSharing),
+		preemption.NewOracle(s.preemptor, snap), replaceableWorkloadSlice,
+		s.quotaCheckStrategy, s.resourceFormatter, s.schedulingCycle,
+	)
+
+	var sim schedulerSimulator = &internalSimulator{
+		snap:        snap,
+		flvAssigner: flvAssigner,
+		preemptor:   s.preemptor,
+	}
+
+	assignment, targets, success := sim.Schedule(ctx, cq, wl, preemptionTargets, nil)
+	if !success && workload.MinCountsUsable(wl.Obj) && wl.CanBePartiallyAdmitted() {
+		reducer := flavorassigner.NewOrderedPodSetReducer(wl.Obj.Spec.PodSets, func(nextCounts []int32) (*partialAssignment, bool) {
+			if assignment, targets, success := sim.Schedule(ctx, cq, wl, preemptionTargets, nextCounts); success {
+				return &partialAssignment{
+					assignment:        *assignment,
+					preemptionTargets: targets,
+				}, true
+			}
+			return nil, false
+		})
+		if pa, found := reducer.Reduce(); found {
+			assignment, targets = &pa.assignment, append(preemptionTargets, pa.preemptionTargets...)
+		}
+	}
+	sim.Finalize(ctx, assignment, cq, wl, targets)
+
+	return *assignment, targets
 }
 
 // flavorScanStateOutdated reports whether the recorded flavor assignment no longer describes
@@ -891,77 +922,6 @@ func flavorScanStateOutdated(last *workload.FlavorScanState, currentCQGeneration
 		}
 	}
 	return currentCQGeneration > last.AllocatableResourceGeneration
-}
-
-// getInitialAssignments computes the initial resource flavor assignment and any required preemption targets
-// for a workload slice.
-//
-// The function attempts to assign resources to the provided workload slice using the current
-// snapshot of the scheduling state. It proceeds in the following steps:
-//
-//  1. It first checks for any preemptible workload slices that workload may replace, using an annotation-based lookup.
-//  2. It creates a flavor assigner to compute a full assignment scale-adjusted for preemptable workload slice targets
-//     based on either:
-//     - direct fit (no preemption needed), or
-//     - preemption (if needed and possible).
-//  3. If direct assignment isn't possible but preemption is enabled and viable, it includes any additional
-//     preemption targets obtained through the configured preemptor.
-//  4. If partial admission is enabled and the workload allows it, the function attempts to reduce pod counts
-//     across PodSets to find an assignable configuration—again checking for preemption if needed.
-//
-// Returns:
-//   - A flavorassigner.Assignment representing the selected (possibly reduced) flavor allocation.
-//   - A slice of preemption targets, which may include both explicitly annotated slices and those
-//     identified during scheduling.
-//
-// If no valid assignment can be made, returns the original full assignment with no preemption targets.
-func (s *Scheduler) getInitialAssignments(ctx context.Context, wl *workload.Info, snap *schdcache.Snapshot) (flavorassigner.Assignment, []*preemption.Target) {
-	cq := snap.ClusterQueue(wl.ClusterQueue)
-
-	// Prepare the base assignment. Include TAS topology assignment if relevant.
-	preemptionTargets, replaceableWorkloadSlice := workloadslicing.ReplacedWorkloadSlice(wl, snap)
-	flvAssigner := flavorassigner.New(
-		wl, cq, snap.ResourceFlavors, fairsharing.Enabled(s.fairSharing),
-		preemption.NewOracle(s.preemptor, snap), replaceableWorkloadSlice,
-		s.quotaCheckStrategy, s.resourceFormatter, s.schedulingCycle,
-	)
-	fullAssignment := flvAssigner.AssignWithTopology(ctx, nil)
-
-	arm := fullAssignment.RepresentativeMode()
-	if arm == flavorassigner.Fit {
-		return fullAssignment, preemptionTargets
-	}
-
-	// Find preemption targets.
-	if arm == flavorassigner.Preempt {
-		faPreemptionTargets := s.preemptor.GetTargets(ctx, *wl, fullAssignment, snap)
-		if len(faPreemptionTargets) > 0 {
-			return fullAssignment, append(preemptionTargets, faPreemptionTargets...)
-		}
-	}
-
-	// Handle partial admissions.
-	if workload.MinCountsUsable(wl.Obj) && wl.CanBePartiallyAdmitted() {
-		reducer := flavorassigner.NewOrderedPodSetReducer(wl.Obj.Spec.PodSets, func(nextCounts []int32) (*partialAssignment, bool) {
-			assignment := flvAssigner.AssignWithTopology(ctx, nextCounts)
-			mode := assignment.RepresentativeMode()
-			if mode == flavorassigner.Fit {
-				return &partialAssignment{assignment: assignment}, true
-			}
-
-			if mode == flavorassigner.Preempt {
-				preemptionTargets := s.preemptor.GetTargets(ctx, *wl, assignment, snap)
-				if len(preemptionTargets) > 0 {
-					return &partialAssignment{assignment: assignment, preemptionTargets: preemptionTargets}, true
-				}
-			}
-			return nil, false
-		})
-		if pa, found := reducer.Reduce(); found {
-			return pa.assignment, append(preemptionTargets, pa.preemptionTargets...)
-		}
-	}
-	return fullAssignment, nil
 }
 
 func (s *Scheduler) evictWorkloadAfterFailedTASReplacement(ctx context.Context, log logr.Logger, wl *kueue.Workload) error {
@@ -1012,56 +972,6 @@ func simulatePodRemoval(ctx context.Context, log logr.Logger, snapshot *schdcach
 			}
 		}
 		snapshot.ForgetSimulatedFeasibility()
-	}
-}
-
-func updateAssignmentForTAS(
-	ctx context.Context,
-	snapshot *schdcache.Snapshot,
-	cq *schdcache.ClusterQueueSnapshot,
-	wl *workload.Info,
-	assignment *flavorassigner.Assignment,
-	targets []*preemption.Target,
-) {
-	log := log.FromContext(ctx)
-
-	if features.Enabled(features.TopologyAwareScheduling) && assignment.RepresentativeMode() == flavorassigner.Preempt &&
-		(workload.IsExplicitlyRequestingTAS(wl.Obj.Spec.PodSets...) || cq.IsTASOnly()) && !workload.HasTopologyAssignmentWithUnhealthyNode(wl.Obj) {
-		tasRequests := assignment.WorkloadsTopologyRequests(log, wl, cq)
-		var tasResult schdcache.TASAssignmentsResult
-		log = log.WithValues("workload", klog.KRef(wl.Obj.Namespace, wl.Obj.Name))
-
-		if len(targets) > 0 {
-			var targetWorkloads []*workload.Info
-			for _, target := range targets {
-				targetWorkloads = append(targetWorkloads, target.WorkloadInfo)
-			}
-			revertUsage := snapshot.SimulateWorkloadUsageRemoval(targetWorkloads)
-			// Freeing the victims' quota is not enough. Until the simulator is told,
-			// it still reports their Pods and their nodes still look occupied.
-			revertPods := simulatePodRemoval(ctx, log, snapshot, targetWorkloads)
-			tasResult = cq.FindTopologyAssignmentsForWorkload(
-				ctx,
-				tasRequests,
-				schdcache.WithWorkload(wl.Obj),
-			)
-			revertPods()
-			revertUsage()
-		} else {
-			// In this scenario we don't have any preemption candidates, yet we need
-			// to reserve the TAS resources to avoid the situation when a lower
-			// priority workload further in the queue gets admitted and preempted
-			// in the next scheduling cycle by the waiting workload. To obtain
-			// a TAS assignment for reserving the resources we run the algorithm
-			// assuming the cluster is empty.
-			tasResult = cq.FindTopologyAssignmentsForWorkload(
-				ctx,
-				tasRequests,
-				schdcache.WithSimulateEmpty(true),
-				schdcache.WithWorkload(wl.Obj),
-			)
-		}
-		assignment.UpdateForTASResult(log, cq, wl, tasResult)
 	}
 }
 

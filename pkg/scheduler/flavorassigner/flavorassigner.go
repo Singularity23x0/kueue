@@ -700,7 +700,7 @@ func (a *FlavorAssigner) AssignWithTopology(ctx context.Context, counts []int32)
 	if failed {
 		return assignment
 	}
-	a.assignTopology(ctx, log, &assignment)
+	a.AssignTopology(ctx, log, &assignment)
 	assignment.ResolveNoFitReason(a.cq)
 	return assignment
 }
@@ -870,7 +870,7 @@ func (a *FlavorAssigner) AssignFlavors(ctx context.Context, log logr.Logger, cou
 	return assignment, false
 }
 
-func (a *FlavorAssigner) assignTopology(ctx context.Context, log logr.Logger, assignment *Assignment) {
+func (a *FlavorAssigner) AssignTopology(ctx context.Context, log logr.Logger, assignment *Assignment) {
 	if features.Enabled(features.TopologyAwareScheduling) {
 		if features.Enabled(features.ElasticJobsViaWorkloadSlicesWithTAS) && a.replaceWorkloadSlice != nil {
 			// Elastic placement accounts for the previous assignment itself.
