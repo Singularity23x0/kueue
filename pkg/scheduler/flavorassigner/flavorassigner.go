@@ -99,6 +99,18 @@ func (a *Assignment) UpdateForTASResult(log logr.Logger, cq *schdcache.ClusterQu
 	a.Usage.TAS = a.ComputeTASNetUsage(log, cq, wl, nil)
 }
 
+// ResolvePodSetFailure updates the status of the given PodSet and adjusts
+// the RepresentativeMode of the PodSet and the Assignment at large.
+func (a *Assignment) ResolvePodSetFailure(psRef kueue.PodSetReference, newMode FlavorAssignmentMode, err error, reasons ...string) {
+	psAssignment := a.podSetAssignmentByName(psRef)
+	psAssignment.withReasons(reasons...)
+	if err != nil {
+		psAssignment.Status.err = err
+	}
+	// update the mode for all flavors and the representative mode
+	a.updateMode(psRef, newMode)
+}
+
 func (a *Assignment) SetRepresentativeMode(mode FlavorAssignmentMode) {
 	a.representativeMode = &mode
 	for i := range a.PodSets {
@@ -433,8 +445,8 @@ func (psa *PodSetAssignment) updateMode(newMode FlavorAssignmentMode) {
 	}
 }
 
-func (psa *PodSetAssignment) reason(reason string) {
-	psa.Status.reasons = append(psa.Status.reasons, reason)
+func (psa *PodSetAssignment) withReasons(reasons ...string) {
+	psa.Status.reasons = append(psa.Status.reasons, reasons...)
 }
 
 func (psa *PodSetAssignment) markFlavorAttempt(flavor kueue.ResourceFlavorReference, mode FlavorAssignmentMode, reason string) {
@@ -924,10 +936,7 @@ func (a *FlavorAssigner) AssignTopology(ctx context.Context, log logr.Logger, as
 		result := a.cq.FindTopologyAssignmentsForWorkload(ctx, tasRequests, schdcache.WithWorkloadInfo(a.wl))
 		if failure := result.Failure(); failure != nil {
 			// There is at least one PodSet which does not fit
-			psAssignment := assignment.podSetAssignmentByName(failure.PodSetName)
-			psAssignment.reason(failure.Reason)
-			// update the mode for all flavors and the representative mode
-			assignment.updateMode(failure.PodSetName, Preempt)
+			assignment.ResolvePodSetFailure(failure.PodSetName, Preempt, nil, failure.Reason)
 		} else {
 			// All PodSets fit, we just update the TopologyAssignments
 			assignment.UpdateForTASResult(log, a.cq, a.wl, result)
