@@ -9,7 +9,7 @@ concurrency:
 jobs:
   authorize:
     name: Authorize and Parse Command
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 10
     permissions:
       contents: read
@@ -95,6 +95,7 @@ jobs:
         uses: $/.github/actions/authorize-release-actor
         with:
           actor: ${{ github.actor }}
+          use-system-python: true
           aliases: |
             release-team
             kueue-approvers

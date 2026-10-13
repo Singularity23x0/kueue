@@ -12,28 +12,54 @@ inputs:
     description: Path to the OWNERS_ALIASES file.
     required: false
     default: OWNERS_ALIASES
+  use-system-python:
+    description: >-
+      If true, skip actions/setup-python and use the runner's preinstalled python3
+      (e.g. on ubuntu-slim). Dependencies are installed into a virtual environment
+      because the system Python may be externally managed (PEP 668).
+    required: false
+    default: 'false'
 
 outputs:
   error_message:
     description: User-facing authorization or configuration error.
-    value: ${{ steps.verify.outputs.error_message }}
+    value: ${{ steps.verify.outputs.error_message || steps.install.outputs.error_message }}
 
 runs:
   using: composite
   steps:
     - name: Set up Python
+      if: ${{ inputs.use-system-python != 'true' }}
       uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
       with:
         python-version: '3.12'
 
     - name: Install Python dependencies
+      id: install
       shell: bash
+      env:
+        USE_SYSTEM_PYTHON: ${{ inputs.use-system-python }}
       run: |
-        python3 -m pip install \
+        PYTHON=python3
+        if [ "$USE_SYSTEM_PYTHON" = "true" ]; then
+          echo "Using system Python: $(python3 --version 2>&1)"
+          VENV_DIR="${RUNNER_TEMP}/authorize-release-actor-venv"
+          if ! python3 -m venv "$VENV_DIR"; then
+            echo "error_message=❌ Failed to create a Python virtual environment with the runner's python3." >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          PYTHON="${VENV_DIR}/bin/python"
+        fi
+
+        if ! "$PYTHON" -m pip install \
           --no-deps \
           --only-binary=:all: \
           --require-hashes \
-          --requirement hack/releasing/requirements.txt
+          --requirement hack/releasing/requirements.txt; then
+          echo "error_message=❌ Failed to install Python dependencies for release actor authorization." >> "$GITHUB_OUTPUT"
+          exit 1
+        fi
+        echo "python=$PYTHON" >> "$GITHUB_OUTPUT"
 
     - name: Verify actor authorization
       id: verify
@@ -42,6 +68,7 @@ runs:
         ACTOR: ${{ inputs.actor }}
         AUTHORIZED_ALIASES: ${{ inputs.aliases }}
         OWNERS_FILE: ${{ inputs.owners-file }}
+        PYTHON: ${{ steps.install.outputs.python }}
       run: |
         alias_args=()
         while IFS= read -r alias; do
@@ -51,7 +78,7 @@ runs:
         done <<< "$AUTHORIZED_ALIASES"
 
         set +e
-        authorization_error=$(python3 hack/releasing/authorize_release_actor.py \
+        authorization_error=$("$PYTHON" hack/releasing/authorize_release_actor.py \
           --actor "$ACTOR" \
           --owners-file "$OWNERS_FILE" \
           "${alias_args[@]}" 2>&1)
