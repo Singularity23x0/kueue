@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	schedulingv1alpha3 "k8s.io/api/scheduling/v1alpha3"
@@ -64,7 +63,7 @@ func (p *wasPlanner) Plan(ctx context.Context, initialAssignment *flavorassigner
 	}
 
 	opts := assignment.BuildOptions(options...)
-	if opts.PreemptionFilter == nil {
+	if opts.PreemptionManager == nil {
 		plan.Error = errors.New("PreemptionFilter option not configured for wasPlanner")
 		return
 	}
@@ -168,13 +167,22 @@ func (p *wasPlanner) schedule(
 	ctx context.Context,
 	pods []*corev1.Pod,
 	opts ...simulator.ScheduleOption,
-) (podSetPlacementSummary, podSetFailureSummary, []workload.Reference, error) {
+) (
+	placementSummary podSetPlacementSummary,
+	failures podSetFailureSummary,
+	immediateFit bool,
+	preemptionVictims []workload.Reference,
+	err error,
+) {
 	schedulingResult := p.snapshot.SchedulerSimulator.ScheduleWorkload(ctx, pods, opts...)
 	if schedulingResult.Error != nil {
-		return nil, nil, nil, fmt.Errorf("failed to schedule workload: %w", schedulingResult.Error)
+		err = fmt.Errorf("failed to schedule workload: %w", schedulingResult.Error)
+		return
 	}
-	placementSummary, failures := groupByPodSet(pods, schedulingResult.PodPlacements)
-	return placementSummary, failures, schedulingResult.PreemptionVictims, nil
+	placementSummary, failures = groupByPodSet(pods, schedulingResult.PodPlacements)
+	immediateFit = schedulingResult.ImmediateFit
+	preemptionVictims = schedulingResult.PreemptionVictims
+	return
 }
 
 func (p *wasPlanner) scheduleWithoutPreemption(
@@ -184,21 +192,21 @@ func (p *wasPlanner) scheduleWithoutPreemption(
 	planOpts *assignment.Options,
 ) (placementSummary podSetPlacementSummary, failures podSetFailureSummary, err error) {
 	var opts []simulator.ScheduleOption
-	var preemptionVictims []workload.Reference
+	var immediateFit bool
 
 	if len(planOpts.CommittedPreemptionVictims) > 0 {
 		// The borrowing param holds no meaning here
 		// as the workload will not be preempting anything on this call.
-		planOpts.PreemptionFilter.Initialize(assignment, true)
+		planOpts.PreemptionManager.Configure(assignment, true)
 		opts = append(opts, simulator.WithCommittedPreemptionVictims(planOpts.CommittedPreemptionVictims))
-		opts = append(opts, simulator.WithPreemptionFilter(planOpts.PreemptionFilter))
+		opts = append(opts, simulator.WithPreemptionFilter(planOpts.PreemptionManager))
 	}
-	placementSummary, failures, preemptionVictims, err = p.schedule(ctx, pods, opts...)
-	planOpts.PreemptionFilter.Reset()
+	placementSummary, failures, immediateFit, _, err = p.schedule(ctx, pods, opts...)
+	planOpts.PreemptionManager.ResetToDefault()
 	if err != nil {
 		return nil, nil, err
 	}
-	if len(failures) == 0 && len(preemptionVictims) > 0 {
+	if len(failures) == 0 && !immediateFit {
 		assignment.DemoteTo(flavorassigner.DeferredFit)
 		return placementSummary, nil, nil
 	}
@@ -215,23 +223,19 @@ func (p *wasPlanner) scheduleWithPreemption(
 	planOpts *assignment.Options,
 ) (podSetPlacementSummary, podSetFailureSummary, []*preemption.Target, error) {
 	for strategy := range p.preemptor.GetPreemptionStrategyIterator(ctx, *p.wl, p.snapshot, assignment) {
-		planOpts.PreemptionFilter.Initialize(&assignment, strategy.AllowBorrowing())
-		placementSummary, failures, preemptedWorkloads, err := p.schedule(
+		planOpts.PreemptionManager.Configure(&assignment, strategy.AllowBorrowing())
+		// We already established that both an immediate and a deferred fit are not possible.
+		placementSummary, failures, _, preemptedWorkloads, err := p.schedule(
 			ctx,
 			pods,
 			simulator.WithPreemptionCandidates(strategy.Candidates()),
-			simulator.WithPreemptionFilter(planOpts.PreemptionFilter),
+			simulator.WithPreemptionFilter(planOpts.PreemptionManager),
 			simulator.WithCommittedPreemptionVictims(planOpts.CommittedPreemptionVictims),
 		)
-		planOpts.PreemptionFilter.Reset()
+		planOpts.PreemptionManager.ResetToDefault()
 		strategy.Reset()
 		if err != nil {
 			return nil, nil, nil, err
-		}
-		if len(planOpts.CommittedPreemptionVictims) > 0 {
-			preemptedWorkloads = slices.DeleteFunc(preemptedWorkloads, func(wl workload.Reference) bool {
-				return planOpts.CommittedPreemptionVictims.Has(wl)
-			})
 		}
 		if len(failures) == 0 {
 			targets, err := strategy.GetTargets(preemptedWorkloads)
@@ -248,7 +252,7 @@ func (p *wasPlanner) scheduleWithPreemption(
 	// No preemption targets succeeded. Simulate against an empty cluster to check
 	// if the workload can fit at all and, if so, reserve TAS resources while waiting
 	// for quota so lower-priority workloads do not admit ahead of it.
-	placementSummary, failures, _, err := p.schedule(ctx, pods, simulator.WithSimulateEmpty(true))
+	placementSummary, failures, _, _, err := p.schedule(ctx, pods, simulator.WithSimulateEmpty(true))
 	if err != nil {
 		return nil, nil, nil, err
 	}

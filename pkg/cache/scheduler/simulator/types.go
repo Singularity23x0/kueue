@@ -94,6 +94,7 @@ type PreemptionFilter interface {
 type ScheduleOptions struct {
 	// PreemptionCandidates is the ordered sequence of candidate workloads
 	// that may be preempted to make room for the scheduled workload.
+	// The yielded list of candidates cannot include workloads passed in CommittedPreemptionVictims.
 	PreemptionCandidates iter.Seq2[workload.Reference, *workload.Info]
 	// PreemptionFilter evaluates whether preempting candidate workloads
 	// satisfies non-node constraints (such as quota).
@@ -103,6 +104,7 @@ type ScheduleOptions struct {
 	SimulateEmpty bool
 	// CommittedPreemptionVictims represents workloads that have
 	// already been established as preemption targets/victims.
+	// Any items in CommittedPreemptionVictims cannot be yielded as PreemptionCandidates.
 	CommittedPreemptionVictims map[workload.Reference]*workload.Info
 }
 
@@ -155,9 +157,20 @@ func WithCommittedPreemptionVictims(targets map[workload.Reference]*workload.Inf
 
 // SchedulingResult encapsulates the node assignments for the pods of the Workload.
 type SchedulingResult struct {
-	PodPlacements     PodPlacements
+	// PodPlacements maps Pods to the result of their placement.
+	// Includes exactly one entry for each Pod of the Workload.
+	PodPlacements PodPlacements
+	// PreemptionVictims lists Workloads that must be preempted
+	// for a successful placement to be feasible.
+	// This list does not include committed victims required for the placement to work.
 	PreemptionVictims []workload.Reference
-	Error             error
+	// ImmediateFit informs if the placement can be exercised
+	// without waiting for any preemptions (including both new and committed victims).
+	// Can only be true when there are no PreemptionVictims present and all PodPlacements are valid.
+	ImmediateFit bool
+	// Error denotes an internal system error.
+	// If set, all other fields are left empty.
+	Error error
 }
 
 type PodPlacements map[client.ObjectKey]*PodPlacement
