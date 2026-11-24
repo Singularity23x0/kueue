@@ -155,6 +155,18 @@ class FakeGitHubClient:
 
 
 class ParsingTests(unittest.TestCase):
+    def test_active_release_template_builds_valid_release_graph(self) -> None:
+        """Guardrail: ensure the active NEW_RELEASE.md template always builds into a valid ReleaseGraph."""
+        template = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+        raw_graph = rc.build_release_graph(template)
+        self.assertTrue(raw_graph, "Active release template produced an empty graph")
+
+        for raw_ver in ("v0.20.8", "v0.21.0", "v1.0.0"):
+            ver = rc.parse_version(raw_ver)
+            graph = rc.build_release_graph(template, ver)
+            self.assertTrue(graph, f"Active release template produced an empty graph for {raw_ver}")
+
     def test_parse_version(self) -> None:
         v = rc.parse_version("v0.20.8")
         self.assertEqual((v.major, v.minor, v.patch), (0, 20, 8))
@@ -642,10 +654,12 @@ class CoordinatorFlowTests(unittest.TestCase):
         body = make_ready_body(patch=True)
         gh = FakeGitHubClient(body=body, published_tags=["v0.21.0"])
 
+        patch_v = rc.parse_version("v0.20.8")
         patch_coord = rc.ReleaseCoordinator(
-            version=rc.parse_version("v0.20.8"),
+            version=patch_v,
             gh=gh,
             repo_root=REPO_ROOT,
+            graph=rc.build_release_graph(body, patch_v),
         )
         patch_coord.release_issue = rc.parse_release_issue(body, patch_coord.graph, number=gh.issue_number)
 
@@ -654,10 +668,12 @@ class CoordinatorFlowTests(unittest.TestCase):
         self.assertFalse(patch_coord._should_skip_step("11.3", patch_coord.graph["11.3"]))
         self.assertTrue(patch_coord._should_skip_step("10", patch_coord.graph["10"]))
 
+        minor_v = rc.parse_version("v0.21.0")
         minor_coord = rc.ReleaseCoordinator(
-            version=rc.parse_version("v0.21.0"),
+            version=minor_v,
             gh=gh,
             repo_root=REPO_ROOT,
+            graph=rc.build_release_graph(body, minor_v),
         )
         minor_coord.release_issue = rc.parse_release_issue(body, minor_coord.graph, number=gh.issue_number)
 
@@ -690,11 +706,13 @@ class CoordinatorFlowTests(unittest.TestCase):
             "r",     # retry after 8001 closed
             "8002",  # enter replacement PR number
         ])
+        v = rc.parse_version("v0.20.8")
         coord = rc.ReleaseCoordinator(
-            version=rc.parse_version("v0.20.8"),
+            version=v,
             gh=gh,
             repo_root=REPO_ROOT,
             poll_interval=0,
+            graph=rc.build_release_graph(body, v),
             input_fn=lambda _prompt: next(inputs),
             sleep_fn=lambda _s: None,
         )
@@ -798,10 +816,12 @@ class CoordinatorFlowTests(unittest.TestCase):
     def test_waiting_message_lists_all_pending_operations(self) -> None:
         body = make_ready_body(patch=True)
         gh = FakeGitHubClient(body=body)
+        v = rc.parse_version("v0.20.8")
         coord = rc.ReleaseCoordinator(
-            version=rc.parse_version("v0.20.8"),
+            version=v,
             gh=gh,
             repo_root=REPO_ROOT,
+            graph=rc.build_release_graph(body, v),
         )
         coord.release_issue = rc.parse_release_issue(body, coord.graph, number=gh.issue_number)
         step_8_1 = coord.graph["8.1"]
@@ -836,11 +856,13 @@ class CoordinatorFlowTests(unittest.TestCase):
             elif poll["n"] == 2:
                 gh.body = mark_step_done(gh.body, "create-draft-release")
 
+        v = rc.parse_version("v0.20.8")
         coord = rc.ReleaseCoordinator(
-            version=rc.parse_version("v0.20.8"),
+            version=v,
             gh=gh,
             repo_root=REPO_ROOT,
             poll_interval=0,
+            graph=rc.build_release_graph(body, v),
             sleep_fn=advance,
         )
         coord.release_issue = rc.parse_release_issue(body, coord.graph, number=gh.issue_number)
@@ -890,11 +912,13 @@ class CoordinatorFlowTests(unittest.TestCase):
                     ts="2026-11-23 10:01:00 UTC",
                 )
 
+        v = rc.parse_version("v0.20.8")
         coord = rc.ReleaseCoordinator(
-            version=rc.parse_version("v0.20.8"),
+            version=v,
             gh=gh,
             repo_root=REPO_ROOT,
             poll_interval=0,
+            graph=rc.build_release_graph(body, v),
             sleep_fn=finish_on_second_poll,
         )
         coord.release_issue = rc.parse_release_issue(body, coord.graph, number=gh.issue_number)
@@ -956,7 +980,9 @@ class CoordinatorFlowTests(unittest.TestCase):
         v = rc.parse_version("v0.20.8")
         body = make_ready_body(patch=True)
         gh = FakeGitHubClient(body=body)
-        coord = rc.ReleaseCoordinator(version=v, gh=gh, repo_root=REPO_ROOT)
+        coord = rc.ReleaseCoordinator(
+            version=v, gh=gh, repo_root=REPO_ROOT, graph=rc.build_release_graph(body, v)
+        )
 
         step_7 = coord.graph["7"]
         handle = rc.ChatOpsHandle(
@@ -1016,10 +1042,12 @@ class CoordinatorFlowTests(unittest.TestCase):
         # Invalid input ('s' on non-optional), then 'm' (manual) continues without executing script
         ran: list[list[str]] = []
         answers = iter(["s", "x", "m"])
+        graph = rc.build_release_graph(body, v)
         coord = rc.ReleaseCoordinator(
             version=v,
             gh=gh,
             repo_root=REPO_ROOT,
+            graph=graph,
             input_fn=lambda _p: next(answers),
             run_local_fn=lambda cmd, _env: (ran.append(cmd), 0)[1],
         )
@@ -1033,6 +1061,7 @@ class CoordinatorFlowTests(unittest.TestCase):
             version=v,
             gh=gh,
             repo_root=REPO_ROOT,
+            graph=graph,
             input_fn=lambda _p: "q",
         )
         coord_abort.release_issue = rc.parse_release_issue(body, coord_abort.graph, number=gh.issue_number)
@@ -1051,6 +1080,7 @@ class CoordinatorFlowTests(unittest.TestCase):
             version=v,
             gh=gh,
             repo_root=REPO_ROOT,
+            graph=graph,
             input_fn=lambda _p: "s",
             run_local_fn=lambda cmd, _env: (ran.append(cmd), 0)[1],
         )
@@ -1062,6 +1092,7 @@ class CoordinatorFlowTests(unittest.TestCase):
         v = rc.parse_version("v0.20.8")
         body = make_ready_body(patch=True)
         gh = FakeGitHubClient(body=body)
+        graph = rc.build_release_graph(body, v)
 
         # No PR ref on issue initially -> invalid input -> Enter re-syncs and picks up newly added PR ref
         prompts_seen = {"n": 0}
@@ -1079,6 +1110,7 @@ class CoordinatorFlowTests(unittest.TestCase):
             gh=gh,
             repo_root=REPO_ROOT,
             poll_interval=0,
+            graph=graph,
             input_fn=input_resync,
             sleep_fn=lambda _: None,
         )
@@ -1093,6 +1125,7 @@ class CoordinatorFlowTests(unittest.TestCase):
             version=v,
             gh=gh2,
             repo_root=REPO_ROOT,
+            graph=graph,
             input_fn=lambda _p: "q",
         )
         coord_abort.release_issue = rc.parse_release_issue(body, coord_abort.graph, number=gh2.issue_number)
@@ -1114,6 +1147,7 @@ class CoordinatorFlowTests(unittest.TestCase):
             gh=gh3,
             repo_root=REPO_ROOT,
             poll_interval=0,
+            graph=graph,
             input_fn=retry_with_updated_issue,
             sleep_fn=lambda _: None,
         )
@@ -1124,11 +1158,12 @@ class CoordinatorFlowTests(unittest.TestCase):
         v = rc.parse_version("v0.20.8")
         body = make_ready_body(patch=True)
         gh = FakeGitHubClient(body=body)
+        graph = rc.build_release_graph(body, v)
 
         # Manual step invalid input then quit
         answers = iter(["invalid", "q"])
         coord = rc.ReleaseCoordinator(
-            version=v, gh=gh, repo_root=REPO_ROOT, input_fn=lambda _p: next(answers)
+            version=v, gh=gh, repo_root=REPO_ROOT, graph=graph, input_fn=lambda _p: next(answers)
         )
         step_13 = coord.graph["13"]
         with self.assertRaises(rc.AbortRelease):
@@ -1137,13 +1172,15 @@ class CoordinatorFlowTests(unittest.TestCase):
         # Optional step confirmation invalid input then quit
         answers2 = iter(["maybe", "q"])
         coord2 = rc.ReleaseCoordinator(
-            version=v, gh=gh, repo_root=REPO_ROOT, input_fn=lambda _p: next(answers2)
+            version=v, gh=gh, repo_root=REPO_ROOT, graph=graph, input_fn=lambda _p: next(answers2)
         )
         with self.assertRaises(rc.AbortRelease):
             coord2._confirm_optional_step("2", rc.Step(kind="prereq", description="Opt", optional=True))
 
         # Finalize issue quit
-        coord3 = rc.ReleaseCoordinator(version=v, gh=gh, repo_root=REPO_ROOT, input_fn=lambda _p: "q")
+        coord3 = rc.ReleaseCoordinator(
+            version=v, gh=gh, repo_root=REPO_ROOT, graph=graph, input_fn=lambda _p: "q"
+        )
         coord3.release_issue = rc.parse_release_issue(body, coord3.graph, number=gh.issue_number)
         step_15 = coord3.graph["15"]
         with self.assertRaises(rc.AbortRelease):
@@ -1181,6 +1218,22 @@ class CoordinatorFlowTests(unittest.TestCase):
             self.assertEqual(rc.main(["v0.20.8"]), 130)
         with mock.patch.object(rc.ReleaseCoordinator, "run", side_effect=RuntimeError("api down")):
             self.assertEqual(rc.main(["v0.20.8"]), 1)
+        with mock.patch.object(rc.ReleaseCoordinator, "run", side_effect=ValueError("bad graph")):
+            self.assertEqual(rc.main(["v0.20.8"]), 1)
+
+    def test_run_fails_when_issue_body_graph_is_invalid(self) -> None:
+        broken_body = (
+            '- [x] **[1]** A <!-- step-meta:{"kind":"prereq"} -->\n'
+            '- [ ] **[3]** Gap without step 2 <!-- step-meta:{"kind":"prereq"} -->\n'
+        )
+        gh = FakeGitHubClient(body=broken_body)
+        coord = rc.ReleaseCoordinator(
+            version=rc.parse_version("v0.20.8"),
+            gh=gh,
+            repo_root=REPO_ROOT,
+        )
+        with self.assertRaisesRegex(ValueError, "non-contiguous numbering"):
+            coord.run()
 
 
 if __name__ == "__main__":

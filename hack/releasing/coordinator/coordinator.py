@@ -92,7 +92,6 @@ from release_graph import (
     REPO_ROOT,
     STEP_ID_RE,
     STEP_MARKER_RE,
-    TEMPLATE_PATH,
     ReleaseGraph,
     Step,
     Version,
@@ -553,11 +552,7 @@ class ReleaseCoordinator:
         self.repo_root = repo_root
         self.poll_interval = poll_interval
         self.skip_readiness_check = skip_readiness_check
-        self.graph = (
-            graph
-            if graph is not None
-            else build_release_graph(TEMPLATE_PATH.read_text(encoding="utf-8"), version=version)
-        )
+        self.graph: ReleaseGraph = graph if graph is not None else ReleaseGraph(version=version)
         self.input_fn = input_fn
         self.sleep_fn = sleep_fn
         self.run_local_fn = run_local_fn or self._default_run_local
@@ -1012,10 +1007,6 @@ class ReleaseCoordinator:
             self._finalize_issue(step_id, step)
 
     def run(self) -> None:
-        print(f"📋 Release flow ({self.version.raw}):")
-        print(self.graph.visualize())
-        print()
-
         number, title, url = self.gh.find_release_issue(self.version)
         self.release_issue = ReleaseIssue(number=number, title=title, url=url)
         self.github_user = self.gh.current_user()
@@ -1023,7 +1014,22 @@ class ReleaseCoordinator:
         print(f"   URL: {self.release_issue.url}")
         print(f"   Release type: {'patch' if self.version.is_patch else 'major/minor'}")
 
-        self._sync_release_issue()
+        body = self.gh.get_issue_body(self.release_issue.number)
+        if not self.graph:
+            self.graph = build_release_graph(body, version=self.version)
+        self.release_issue = parse_release_issue(
+            body,
+            self.graph,
+            self.gh.repo,
+            number=self.release_issue.number,
+            title=self.release_issue.title,
+            url=self.release_issue.url,
+        )
+
+        print(f"\n📋 Release flow ({self.version.raw}):")
+        print(self.graph.visualize())
+        print()
+
         if not self.skip_readiness_check:
             errors = self._verify_release_issue()
             if errors:
@@ -1081,7 +1087,6 @@ def main(argv: Optional[list[str]] = None) -> int:
     except ValueError as err:
         parser.error(str(err))
 
-    graph = build_release_graph(TEMPLATE_PATH.read_text(encoding="utf-8"), version=version)
     gh = GitHubClient(repo=args.repo, api_url=args.api_url)
     coordinator = ReleaseCoordinator(
         version=version,
@@ -1089,7 +1094,6 @@ def main(argv: Optional[list[str]] = None) -> int:
         repo_root=REPO_ROOT,
         poll_interval=args.poll_interval,
         skip_readiness_check=args.skip_readiness_check,
-        graph=graph,
     )
     try:
         coordinator.run()
@@ -1099,7 +1103,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     except KeyboardInterrupt:
         print("\n🛑 Interrupted by user.")
         return 130
-    except RuntimeError as err:
+    except (RuntimeError, ValueError) as err:
         print(f"\n❌ {err}", file=sys.stderr)
         return 1
     return 0
